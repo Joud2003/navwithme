@@ -1,4 +1,5 @@
 from math import pi, atan2
+import os
 import numpy as np
 import threading
 import rclpy
@@ -43,6 +44,7 @@ class Turtlebot3:
         self.start_y = 0.0
         self.start_theta = 0.0
         self.target_theta = 0.0
+        self.trajectory = list()
 
     def normalize_angle(self, angle):
         while angle > pi:
@@ -152,8 +154,6 @@ class Turtlebot3:
                 self.vel_pub.publish(msg)
                 self.node.get_logger().info(f"Idle state")
 
-        self.trajectory.append([self.pose.x, self.pose.y])
-
     def odom_callback(self, msg):
         quaternion = [
             msg.pose.pose.orientation.x,
@@ -165,6 +165,7 @@ class Turtlebot3:
         self.pose.theta = yaw
         self.pose.x = msg.pose.pose.position.x
         self.pose.y = msg.pose.pose.position.y
+        self.trajectory.append([self.pose.x, self.pose.y])
 
     def scan_callback(self, msg):
         samples_20_deg = int(0.349 / msg.angle_increment)
@@ -177,15 +178,30 @@ class Turtlebot3:
 
 
 def main(args=None):
+    turtlebot = None
     data = []
-    for _ in range(10):
+    folder = "robot_data"
+    os.makedirs(folder, exist_ok=True)
+
+    try:
         turtlebot = Turtlebot3()
         turtlebot.i = 0
         turtlebot.node.get_logger().info("Main is called, node is created")
-        turtlebot.run()
-        data.append(turtlebot.trajectory)
-        turtlebot.node.destroy_node()
-        np.savetxt("trajectory.csv", np.array(data), delimiter=",")
+        turtlebot.run()  # blocking
+
+    except KeyboardInterrupt:
+        if turtlebot is not None:
+            data.append(turtlebot.trajectory)  # append trajectory now
+            np.savetxt(
+                os.path.join(folder, "trajectory.csv"),
+                np.vstack(data),
+                delimiter=",",
+            )
+            print(f"Trajectory saved to {folder}/trajectory.csv")
+
+    finally:
+        if turtlebot is not None:
+            turtlebot.node.destroy_node()
         rclpy.shutdown()
 
 
