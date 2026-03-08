@@ -30,7 +30,7 @@ class Turtlebot3:
             LaserScan, "scan", self.scan_callback, 10
         )
         self.pd_x = PIDController(1.0, 0.1, 1.0)
-        self.pd_theta = PIDController(1.0, 0.1, 0.3)
+        self.pd_theta = PIDController(1.0, 0.5, 0.0)
         self.front_readings = [4.0]
         self.state = "FORWARD"
         self.sweep_direction = -1  # 1 = left, -1 = right
@@ -56,12 +56,14 @@ class Turtlebot3:
         while rclpy.ok():
             front_dist = np.mean(self.front_readings)
             self.pd_x.setPoint(front_dist)
+            if front_dist < self.wall_threshold:
+                msg.linear.x = 0.0
+                self.vel_pub.publish(msg)
             if self.state == "FORWARD":
+                self.node.get_logger().info("Forward state")
+
                 if front_dist > self.wall_threshold:
                     linear_v = self.pd_x.update(self.wall_threshold)
-                    self.node.get_logger().info(
-                        f"Front distance: {front_dist:.2f}, Linear velocity: {linear_v:.2f}"
-                    )
                     if abs(linear_v) > self.forward_speed:
                         linear_v = self.forward_speed * np.sign(linear_v)
                     msg.linear.x = abs(linear_v)
@@ -76,22 +78,16 @@ class Turtlebot3:
                         self.pose.theta + self.sweep_direction * (pi / 2)
                     )
                     self.pd_theta.setPoint(self.target_theta)
-                    self.node.get_logger().info(
-                        f"Front distance: {front_dist:.2f}, Target theta: {self.target_theta:.2f}"
-                    )
+                    self.node.get_logger().info("Now switching to first turn state")
                     self.state = "TURN_1"
 
             elif self.state == "TURN_1":
-
+                self.node.get_logger().info("First turn state")
                 error = self.normalize_angle(self.target_theta - self.pose.theta)
                 if abs(error) > 0.05:
                     msg.angular.z = max(
-                        min(self.pd_theta.update(self.pose.theta), 0.6), -0.2
+                        min(self.pd_theta.update(self.pose.theta), 0.3), -0.2
                     )
-                    self.node.get_logger().info(
-                        f"Turning 1 error: {error:.2f}. Turning velocity is: {msg.angular.z:.2f}"
-                    )
-
                     msg.linear.x = 0.0
                     self.vel_pub.publish(msg)
 
@@ -105,17 +101,16 @@ class Turtlebot3:
                     self.state = "SHIFT"
 
             elif self.state == "SHIFT":
+                self.node.get_logger().info("Shift state")
                 dx = self.pose.x - self.start_x
                 dy = self.pose.y - self.start_y
                 dist = np.sqrt(dx**2 + dy**2)
 
                 error = self.lane_width - dist
-                self.node.get_logger().info(f"Error is {error:.2f}")
                 if abs(error) > 0.05:
                     linear_v = self.pd_x.update(dist)
                     if abs(linear_v) > self.forward_speed:
                         linear_v = self.forward_speed * np.sign(linear_v)
-                    self.node.get_logger().info(f"Shifting, velocity: {linear_v:.2f}")
 
                     msg.linear.x = abs(linear_v)
                     msg.angular.z = 0.0
@@ -125,22 +120,21 @@ class Turtlebot3:
                     msg.linear.x = 0.0
                     msg.angular.z = 0.0
                     self.vel_pub.publish(msg)
-                    self.target_theta = self.normalize_angle(
-                        self.pose.theta - self.sweep_direction * (pi / 2)
+                    self.target_theta = -1 * self.normalize_angle(
+                        self.pose.theta + self.sweep_direction * (pi / 2)
                     )
                     self.pd_theta.setPoint(self.target_theta)
+                    self.node.get_logger().info("Now switching to second turn state")
+
                     self.state = "TURN_2"
 
             elif self.state == "TURN_2":
+                self.node.get_logger().info("Second turn state")
 
                 error = self.normalize_angle(self.target_theta - self.pose.theta)
-                self.node.get_logger().info(
-                    f"Last turn, distance: {error:.2f}, target: {self.target_theta:.2f} current: {self.pose.theta:.2f}  "
-                )
-
                 if abs(error) > 0.05:
                     msg.angular.z = max(
-                        min(self.pd_theta.update(self.pose.theta), 0.6), -0.2
+                        min(self.pd_theta.update(self.pose.theta), 0.3), -0.2
                     )
                     msg.linear.x = 0.0
                     self.vel_pub.publish(msg)
@@ -152,6 +146,11 @@ class Turtlebot3:
                     self.node.get_logger().info(
                         f"Completed one sweep, switching back to forward"
                     )
+            else:
+                msg.angular.z = 0.0
+                msg.linear.x = 0.0
+                self.vel_pub.publish(msg)
+                self.node.get_logger().info(f"Idle state")
 
         self.trajectory.append([self.pose.x, self.pose.y])
 
@@ -186,8 +185,8 @@ def main(args=None):
         turtlebot.run()
         data.append(turtlebot.trajectory)
         turtlebot.node.destroy_node()
+        np.savetxt("trajectory.csv", np.array(data), delimiter=",")
         rclpy.shutdown()
-    np.savetxt("trajectory.csv", np.array(data), delimiter=",")
 
 
 if __name__ == "__main__":
