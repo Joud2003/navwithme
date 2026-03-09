@@ -23,7 +23,7 @@ setup(
     },
     entry_points={
         "console_scripts": [
-            "move_robot = nav_with_me.controller:main",
+            "move_robot = nav_with_me.robot_navigation:main",
         ],
     },
 )
