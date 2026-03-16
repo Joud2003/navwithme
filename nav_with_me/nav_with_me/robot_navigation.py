@@ -1,10 +1,11 @@
 import os
+from matplotlib import pyplot as plt
 import numpy as np
 import threading
 from .controller import handleControl
 import rclpy
 from tf_transformations import euler_from_quaternion
-from nav_msgs.msg import Odometry
+from nav_msgs.msg import OccupancyGrid, Odometry
 from geometry_msgs.msg import Twist, Pose2D
 from sensor_msgs.msg import LaserScan
 from .utils import PIDController
@@ -29,6 +30,10 @@ class Turtlebot3:
         self.lidar_sub = self.node.create_subscription(
             LaserScan, "scan", self.scan_callback, 10
         )
+        self.map_sub = self.node.create_subscription(
+            OccupancyGrid, "map", self.map_callback, 10
+        )
+        self.map_data = None
         self.pd_x = PIDController(1.0, 0.1, 1.0)
         self.pd_theta = PIDController(1.0, 0.5, 0.0)
         self.front_readings = [4.0]
@@ -44,11 +49,15 @@ class Turtlebot3:
         self.start_theta = 0.0
         self.target_theta = 0.0
         self.trajectory = list()
+        plt.ion()
+        self.fig, self.ax = plt.subplots()
 
     def run(self):
         msg = Twist()
         while rclpy.ok():
             handleControl(self, msg)
+            self.plot_map()   
+            self.rate.sleep()
 
     def odom_callback(self, msg):
         quaternion = [
@@ -72,6 +81,52 @@ class Turtlebot3:
         if len(self.front_readings) > 5:
             self.front_readings.pop(0)
 
+    def map_callback(self, msg):
+        self.map_width = msg.info.width
+        self.map_height = msg.info.height
+        self.resolution = msg.info.resolution
+
+        self.origin_x = msg.info.origin.position.x
+        self.origin_y = msg.info.origin.position.y
+
+        self.map_data = np.array(msg.data).reshape(
+            (self.map_height, self.map_width)
+        )
+
+        self.node.get_logger().info(
+            f"Map received {self.map_width} x {self.map_height}"
+        )
+
+    def plot_map(self):
+
+        if self.map_data is None:
+            return
+
+        grid = self.map_data.copy()
+
+        grid_plot = np.zeros_like(grid)
+
+        grid_plot[grid == -1] = 127
+        grid_plot[grid == 0] = 255
+        grid_plot[grid == 100] = 0
+
+        self.ax.clear()
+
+        self.ax.imshow(
+            grid_plot,
+            cmap="gray",
+            origin="lower"
+        )
+
+        x = int((self.pose.x - self.origin_x) / self.resolution)
+        y = int((self.pose.y - self.origin_y) / self.resolution)
+
+        self.ax.scatter(x, y, c="red", s=40)
+
+        self.ax.set_title("Occupancy Grid Map")
+
+        plt.pause(0.001)
+
 
 def main(args=None):
     turtlebot = None
@@ -94,6 +149,16 @@ def main(args=None):
                 delimiter=",",
             )
             print(f"Trajectory saved to {folder}/trajectory.csv")
+            grid = np.array(turtlebot.map_data).reshape(
+                (turtlebot.map_height, turtlebot.map_width)
+            )
+            plt.clf()
+
+            plt.imshow(grid, cmap="gray", origin="lower")
+
+            plt.title("Occupancy Grid Map")
+
+            plt.pause(0.01)
 
     finally:
         if turtlebot is not None:
