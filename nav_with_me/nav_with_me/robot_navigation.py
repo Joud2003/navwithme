@@ -9,6 +9,7 @@ from nav_msgs.msg import OccupancyGrid, Odometry
 from geometry_msgs.msg import Twist, Pose2D
 from sensor_msgs.msg import LaserScan
 from .utils import PIDController
+from tf2_ros import Buffer, TransformListener
 
 
 class Turtlebot3:
@@ -49,6 +50,8 @@ class Turtlebot3:
         self.start_theta = 0.0
         self.target_theta = 0.0
         self.trajectory = list()
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self.node)
         plt.ion()
         self.fig, self.ax = plt.subplots()
 
@@ -88,14 +91,31 @@ class Turtlebot3:
         self.origin_x = msg.info.origin.position.x
         self.origin_y = msg.info.origin.position.y
 
-        self.map_data = np.array(msg.data).reshape(
-            (self.map_height, self.map_width)
-        )
+        self.map_data = np.array(msg.data).reshape((self.map_height, self.map_width))
 
         self.node.get_logger().info(
             f"Map received {self.map_width} x {self.map_height}"
         )
-        
+        transform = self.tf_buffer.lookup_transform(
+            "map", "base_link", rclpy.time.Time()  # target frame  # robot frame
+        )
+
+        x = transform.transform.translation.x
+        y = transform.transform.translation.y
+        theta = euler_from_quaternion(
+            [
+                transform.transform.rotation.x,
+                transform.transform.rotation.y,
+                transform.transform.rotation.z,
+                transform.transform.rotation.w,
+            ]
+        )[2]
+        self.node.get_logger().info(
+            f"Pose from msg is x: {self.pose.x}, y: {self.pose.y}, theta: {self.pose.theta}"
+        )
+        self.node.get_logger().info(f"Pose from slam is x: {x}, y: {y}, theta: {theta}")
+
+
 def main(args=None):
     turtlebot = None
     data = []
@@ -117,14 +137,14 @@ def main(args=None):
                 delimiter=",",
             )
             print(f"Trajectory saved to {folder}/trajectory.csv")
-            
+
     finally:
         np.savez(
-                os.path.join(folder, 'occupancy_grid_map.npz'),
-                grid = turtlebot.map_data,
-                resolution = turtlebot.resolution,
-                origin_x = turtlebot.origin_x,
-                origin_y = turtlebot.origin_y,
+            os.path.join(folder, "occupancy_grid_map.npz"),
+            grid=turtlebot.map_data,
+            resolution=turtlebot.resolution,
+            origin_x=turtlebot.origin_x,
+            origin_y=turtlebot.origin_y,
         )
         rclpy.shutdown()
 
