@@ -56,7 +56,6 @@ class Turtlebot3:
         msg = Twist()
         while rclpy.ok():
             handleControl(self, msg)
-            self.plot_map()   
             self.rate.sleep()
 
     def odom_callback(self, msg):
@@ -96,38 +95,7 @@ class Turtlebot3:
         self.node.get_logger().info(
             f"Map received {self.map_width} x {self.map_height}"
         )
-
-    def plot_map(self):
-
-        if self.map_data is None:
-            return
-
-        grid = self.map_data.copy()
-
-        grid_plot = np.zeros_like(grid)
-
-        grid_plot[grid == -1] = 127
-        grid_plot[grid == 0] = 255
-        grid_plot[grid == 100] = 0
-
-        self.ax.clear()
-
-        self.ax.imshow(
-            grid_plot,
-            cmap="gray",
-            origin="lower"
-        )
-
-        x = int((self.pose.x - self.origin_x) / self.resolution)
-        y = int((self.pose.y - self.origin_y) / self.resolution)
-
-        self.ax.scatter(x, y, c="red", s=40)
-
-        self.ax.set_title("Occupancy Grid Map")
-
-        plt.pause(0.001)
-
-
+        
 def main(args=None):
     turtlebot = None
     data = []
@@ -149,20 +117,15 @@ def main(args=None):
                 delimiter=",",
             )
             print(f"Trajectory saved to {folder}/trajectory.csv")
-            grid = np.array(turtlebot.map_data).reshape(
-                (turtlebot.map_height, turtlebot.map_width)
-            )
-            plt.clf()
-
-            plt.imshow(grid, cmap="gray", origin="lower")
-
-            plt.title("Occupancy Grid Map")
-
-            plt.pause(0.01)
-
+            
     finally:
-        if turtlebot is not None:
-            turtlebot.node.destroy_node()
+        np.savez(
+                os.path.join(folder, 'occupancy_grid_map.npz'),
+                grid = turtlebot.map_data,
+                resolution = turtlebot.resolution,
+                origin_x = turtlebot.origin_x,
+                origin_y = turtlebot.origin_y,
+        )
         rclpy.shutdown()
 
 
