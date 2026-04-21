@@ -19,15 +19,13 @@ class Turtlebot3:
         self.node.get_logger().info("Pass Ctrl + C to terminate")
         self.vel_pub = self.node.create_publisher(Twist, "cmd_vel", 10)
         self.rate = self.node.create_rate(1)
+        self.timer = self.node.create_timer(0.1, self.update_pose)  # 10 Hz
 
         t = threading.Thread(target=rclpy.spin, args=(self.node,), daemon=True)
         t.start()
         self.pose = Pose2D()
         self.logging_counter = 0
         self.trajectory = list()
-        self.odom_sub = self.node.create_subscription(
-            Odometry, "odom", self.odom_callback, 10
-        )
         self.lidar_sub = self.node.create_subscription(
             LaserScan, "scan", self.scan_callback, 10
         )
@@ -49,11 +47,10 @@ class Turtlebot3:
         self.start_y = 0.0
         self.start_theta = 0.0
         self.target_theta = 0.0
+        self.resolution = 0.0
         self.trajectory = list()
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self.node)
-        plt.ion()
-        self.fig, self.ax = plt.subplots()
 
     def run(self):
         msg = Twist()
@@ -61,17 +58,27 @@ class Turtlebot3:
             handleControl(self, msg)
             self.rate.sleep()
 
-    def odom_callback(self, msg):
-        quaternion = [
-            msg.pose.pose.orientation.x,
-            msg.pose.pose.orientation.y,
-            msg.pose.pose.orientation.z,
-            msg.pose.pose.orientation.w,
-        ]
-        (_, _, yaw) = euler_from_quaternion(quaternion)
-        self.pose.theta = yaw
-        self.pose.x = msg.pose.pose.position.x
-        self.pose.y = msg.pose.pose.position.y
+    def update_pose(self):
+        if not self.tf_buffer.can_transform("map", "base_link", rclpy.time.Time()):
+            self.node.get_logger().warn("Transform not available yet")
+            return
+
+        transform = self.tf_buffer.lookup_transform(
+            "map", "base_link", rclpy.time.Time()  # target frame  # robot frame
+        )
+        self.pose.x = transform.transform.translation.x
+        self.pose.y = transform.transform.translation.y
+        self.pose.theta = euler_from_quaternion(
+            [
+                transform.transform.rotation.x,
+                transform.transform.rotation.y,
+                transform.transform.rotation.z,
+                transform.transform.rotation.w,
+            ]
+        )[2]
+        self.node.get_logger().info(
+            f"Pose from slam is x: {self.pose.x}, y: {self.pose.y}, theta: {self.pose.theta}"
+        )
         self.trajectory.append([self.pose.x, self.pose.y])
 
     def scan_callback(self, msg):
@@ -99,21 +106,6 @@ class Turtlebot3:
         transform = self.tf_buffer.lookup_transform(
             "map", "base_link", rclpy.time.Time()  # target frame  # robot frame
         )
-
-        x = transform.transform.translation.x
-        y = transform.transform.translation.y
-        theta = euler_from_quaternion(
-            [
-                transform.transform.rotation.x,
-                transform.transform.rotation.y,
-                transform.transform.rotation.z,
-                transform.transform.rotation.w,
-            ]
-        )[2]
-        self.node.get_logger().info(
-            f"Pose from msg is x: {self.pose.x}, y: {self.pose.y}, theta: {self.pose.theta}"
-        )
-        self.node.get_logger().info(f"Pose from slam is x: {x}, y: {y}, theta: {theta}")
 
 
 def main(args=None):
