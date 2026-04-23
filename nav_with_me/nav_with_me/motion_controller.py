@@ -1,6 +1,6 @@
 from math import pi
 import numpy as np
-from nav_with_me.utils import PIDController
+from nav_with_me.pid_controller import PIDController
 
 
 class MotionController:
