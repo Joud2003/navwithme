@@ -65,13 +65,12 @@ class Turtlebot3:
         self.trajectory.append([self.pose.x, self.pose.y])
 
     def scan_callback(self, msg):
-        samples_20_deg = int(0.349 / msg.angle_increment)
-        front_left = msg.ranges[0:samples_20_deg]
-        front_right = msg.ranges[-samples_20_deg:]
-
-        self.front_readings.append(min(front_left + front_right))
+        front_idx = self.object_detection.get_idx(msg, 0)
+        r_front = self.object_detection.get_range(msg, front_idx)
+        self.front_readings.append(r_front)
         if len(self.front_readings) > 5:
             self.front_readings.pop(0)
+
         self.object_detection.detect_front_object(msg)
 
     def map_callback(self, msg):
