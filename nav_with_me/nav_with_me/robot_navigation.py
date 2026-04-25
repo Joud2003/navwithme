@@ -1,8 +1,8 @@
 import os
-from matplotlib import pyplot as plt
 import numpy as np
 import threading
-from .controller import MotionController
+from nav_with_me.object_detection import ObjectDetection
+from .motion_controller import MotionController
 import rclpy
 from tf_transformations import euler_from_quaternion
 from nav_msgs.msg import OccupancyGrid
@@ -20,6 +20,7 @@ class Turtlebot3:
         self.rate = self.node.create_rate(1)
         self.timer = self.node.create_timer(0.1, self.update_pose)  # 10 Hz
         self.controller = MotionController(self)
+        self.object_detection = ObjectDetection(self)
         t = threading.Thread(target=rclpy.spin, args=(self.node,), daemon=True)
         t.start()
         self.lidar_sub = self.node.create_subscription(
@@ -64,13 +65,13 @@ class Turtlebot3:
         self.trajectory.append([self.pose.x, self.pose.y])
 
     def scan_callback(self, msg):
-        samples_20_deg = int(0.349 / msg.angle_increment)
-        front_left = msg.ranges[0:samples_20_deg]
-        front_right = msg.ranges[-samples_20_deg:]
-
-        self.front_readings.append(min(front_left + front_right))
+        front_idx = self.object_detection.get_idx(msg, 0)
+        r_front = self.object_detection.get_range(msg, front_idx)
+        self.front_readings.append(r_front)
         if len(self.front_readings) > 5:
             self.front_readings.pop(0)
+
+        self.object_detection.detect_front_object(msg)
 
     def map_callback(self, msg):
         self.map_width = msg.info.width
