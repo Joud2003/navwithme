@@ -27,10 +27,13 @@ class MotionController:
     def handleControl(self, robot, msg):
         front_dist = np.mean(robot.front_readings)
         self.pd_x.setPoint(front_dist)
-        if front_dist < self.wall_threshold:
+        if front_dist <= self.wall_threshold:
             msg.linear.x = 0.0
             robot.vel_pub.publish(msg)
-        if self.state == "FORWARD":
+            robot.node.get_logger().warn(
+                f"Obstacle detected within {front_dist:.2f}m, stopping"
+            )
+        elif self.state == "FORWARD":
             # robot.node.get_logger().info("Forward state")
 
             if front_dist > self.wall_threshold:
@@ -53,7 +56,7 @@ class MotionController:
                 self.state = "TURN_1"
 
         elif self.state == "TURN_1":
-            robot.node.get_logger().info("First turn state")
+            # robot.node.get_logger().info("First turn state")
             error = self.normalize_angle(self.target_theta - robot.pose.theta)
             if abs(error) > 0.05:
                 msg.angular.z = max(
@@ -68,15 +71,15 @@ class MotionController:
                 self.start_x = robot.pose.x
                 self.start_y = robot.pose.y
                 self.pd_x.setPoint(robot.pose.x + self.lane_width)
-                robot.node.get_logger().info(f"Now switching to shift state")
+                # robot.node.get_logger().info(f"Now switching to shift state")
                 self.state = "SHIFT"
 
         elif self.state == "SHIFT":
-            robot.node.get_logger().info("Shift state")
+            # robot.node.get_logger().info("Shift state")
             dx = robot.pose.x - self.start_x
             dy = robot.pose.y - self.start_y
             dist = np.sqrt(dx**2 + dy**2)
-            robot.node.get_logger().info(f"error is {self.lane_width - dist}")
+            # robot.node.get_logger().info(f"error is {self.lane_width - dist}")
             error = self.lane_width - dist
             if abs(error) > 0.05:
                 linear_v = self.pd_x.update(dist)
@@ -95,12 +98,12 @@ class MotionController:
                     robot.pose.theta + self.sweep_direction * (pi / 2)
                 )
                 self.pd_theta.setPoint(self.target_theta)
-                robot.node.get_logger().info("Now switching to second turn state")
+                # robot.node.get_logger().info("Now switching to second turn state")
 
                 self.state = "TURN_2"
 
         elif self.state == "TURN_2":
-            robot.node.get_logger().info("Second turn state")
+            # robot.node.get_logger().info("Second turn state")
 
             error = self.normalize_angle(self.target_theta - robot.pose.theta)
             if abs(error) > 0.05:
@@ -114,9 +117,9 @@ class MotionController:
                 robot.vel_pub.publish(msg)
                 self.sweep_direction *= -1
                 self.state = "FORWARD"
-                robot.node.get_logger().info(
-                    f"Completed one sweep, switching back to forward"
-                )
+                # robot.node.get_logger().info(
+                #     f"Completed one sweep, switching back to forward"
+                # )
         else:
             msg.angular.z = 0.0
             msg.linear.x = 0.0
