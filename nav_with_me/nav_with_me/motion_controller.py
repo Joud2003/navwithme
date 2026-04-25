@@ -33,7 +33,7 @@ class MotionController:
             robot.node.get_logger().warn(
                 f"Obstacle detected within {front_dist:.2f}m, stopping"
             )
-        elif self.state == "FORWARD":
+        if self.state == "FORWARD":
             # robot.node.get_logger().info("Forward state")
 
             if front_dist > self.wall_threshold:
