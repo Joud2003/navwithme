@@ -1,7 +1,8 @@
 import os
+from matplotlib import pyplot as plt
 import numpy as np
 import threading
-from nav_with_me.object_detection import ObjectDetection
+from .object_detection import ObjectDetection
 from .motion_controller import MotionController
 import rclpy
 from tf_transformations import euler_from_quaternion
@@ -32,7 +33,7 @@ class Turtlebot3:
         self.pose = Pose2D()
         self.trajectory = list()
         self.map_data = None
-        self.front_readings = [4.0]
+        self.readings = {"front": [4.0], "right": [4.0], "left": [4.0]}
         self.resolution = 0.0
         self.trajectory = list()
         self.tf_buffer = Buffer()
@@ -62,16 +63,29 @@ class Turtlebot3:
                 transform.transform.rotation.w,
             ]
         )[2]
+        self.node.get_logger().info(
+            f"Pose updated: x={(self.pose.x)} y={(self.pose.y)} theta={(self.pose.theta)}"
+        )
         self.trajectory.append([self.pose.x, self.pose.y])
 
     def scan_callback(self, msg):
         front_idx = self.object_detection.get_idx(msg, 0)
+        right_idx = self.object_detection.get_idx(msg, 3 * np.pi / 2)
+        left_idx = self.object_detection.get_idx(msg, np.pi / 2)
         r_front = self.object_detection.get_range(msg, front_idx)
-        self.front_readings.append(r_front)
-        if len(self.front_readings) > 5:
-            self.front_readings.pop(0)
+        r_right = self.object_detection.get_range(msg, right_idx)
+        r_left = self.object_detection.get_range(msg, left_idx)
+        self.readings["right"].append(r_right)
+        self.readings["left"].append(r_left)
+        self.readings["front"].append(r_front)
+        if len(self.readings["front"]) > 5:
+            self.readings["front"].pop(0)
+        if len(self.readings["left"]) > 5:
+            self.readings["left"].pop(0)
+        if len(self.readings["right"]) > 5:
+            self.readings["right"].pop(0)
 
-        self.object_detection.detect_front_object(msg)
+        self.object_detection.detect_object(msg)
 
     def map_callback(self, msg):
         self.map_width = msg.info.width
@@ -102,6 +116,21 @@ def main(args=None):
     except KeyboardInterrupt:
         if turtlebot is not None:
             data.append(turtlebot.trajectory)  # append trajectory now
+            object_poses = turtlebot.object_detection.get_objects()
+            print("The saved poses are: ", object_poses)
+            xs = [p[1] for p in object_poses]
+            ys = [p[0] for p in object_poses]
+
+            plt.figure()
+            plt.scatter(xs, ys)
+
+            plt.title("Detected Object Positions")
+            plt.xlabel("X (m)")
+            plt.ylabel("Y (m)")
+            plt.axis("equal")
+            plt.grid(True)
+
+            plt.show()
             np.savetxt(
                 os.path.join(folder, "trajectory.csv"),
                 np.vstack(data),

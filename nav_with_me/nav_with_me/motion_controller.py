@@ -1,6 +1,6 @@
 from math import pi
 import numpy as np
-from nav_with_me.pid_controller import PIDController
+from .pid_controller import PIDController
 
 
 class MotionController:
@@ -25,14 +25,14 @@ class MotionController:
         return angle
 
     def handleControl(self, robot, msg):
-        front_dist = np.mean(robot.front_readings)
+        front_dist = np.mean(self.robot.readings["front"])
         self.pd_x.setPoint(front_dist)
         if front_dist <= self.wall_threshold:
             msg.linear.x = 0.0
             robot.vel_pub.publish(msg)
-            robot.node.get_logger().warn(
-                f"Obstacle detected within {front_dist:.2f}m, stopping"
-            )
+            # robot.node.get_logger().warn(
+            #     f"Obstacle detected within {front_dist:.2f}m, stopping"
+            # )
         if self.state == "FORWARD":
             # robot.node.get_logger().info("Forward state")
 
