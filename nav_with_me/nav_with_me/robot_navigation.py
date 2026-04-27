@@ -116,6 +116,12 @@ def main(args=None):
     except KeyboardInterrupt:
         if turtlebot is not None:
             data.append(turtlebot.trajectory)  # append trajectory now
+            np.savetxt(
+                os.path.join(folder, "trajectory.csv"),
+                np.vstack(data),
+                delimiter=",",
+            )
+            print(f"Trajectory saved to {folder}/trajectory.csv")
             object_poses = turtlebot.object_detection.get_objects()
             print("The saved poses are: ", object_poses)
             xs = [p[1] for p in object_poses]
@@ -131,12 +137,6 @@ def main(args=None):
             plt.grid(True)
 
             plt.show()
-            np.savetxt(
-                os.path.join(folder, "trajectory.csv"),
-                np.vstack(data),
-                delimiter=",",
-            )
-            print(f"Trajectory saved to {folder}/trajectory.csv")
 
     finally:
         np.savez(
