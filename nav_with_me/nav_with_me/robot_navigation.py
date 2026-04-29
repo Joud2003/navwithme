@@ -1,6 +1,9 @@
 import os
 from matplotlib import pyplot as plt
 import numpy as np
+
+if not hasattr(np, "float"):
+    np.float = float
 import threading
 from .object_detection import ObjectDetection
 from .motion_controller import MotionController
@@ -8,6 +11,7 @@ import rclpy
 from tf_transformations import euler_from_quaternion
 from nav_msgs.msg import OccupancyGrid
 from geometry_msgs.msg import Twist, Pose2D
+from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan
 from tf2_ros import Buffer, TransformListener
 
@@ -20,6 +24,7 @@ class Turtlebot3:
         self.vel_pub = self.node.create_publisher(Twist, "cmd_vel", 10)
         self.rate = self.node.create_rate(1)
         self.timer = self.node.create_timer(0.1, self.update_pose)  # 10 Hz
+        self.timer_2 = self.node.create_timer(0.1, self.log_row)
         self.controller = MotionController(self)
         self.object_detection = ObjectDetection(self)
         t = threading.Thread(target=rclpy.spin, args=(self.node,), daemon=True)
@@ -30,8 +35,15 @@ class Turtlebot3:
         self.map_sub = self.node.create_subscription(
             OccupancyGrid, "map", self.map_callback, 10
         )
+        self.odom_sub = self.node.create_subscription(
+            Odometry, "odom", self.odom_callback, 10
+        )
+
         self.pose = Pose2D()
+        self.ground_truth_pose = None
+        self.estimated_pose = None
         self.trajectory = list()
+        self.ground_truth_trajectory = list()
         self.map_data = None
         self.readings = {"front": [4.0], "right": [4.0], "left": [4.0]}
         self.resolution = 0.0
@@ -45,9 +57,26 @@ class Turtlebot3:
             self.controller.handleControl(self, msg)
             self.rate.sleep()
 
+    def odom_callback(self, msg):
+        try:
+            x = msg.pose.pose.position.x
+            y = msg.pose.pose.position.y
+            quaternion = [
+                msg.pose.pose.orientation.x,
+                msg.pose.pose.orientation.y,
+                msg.pose.pose.orientation.z,
+                msg.pose.pose.orientation.w,
+            ]
+            (_, _, yaw) = euler_from_quaternion(quaternion)
+            theta = yaw
+            self.ground_truth_pose = [x, y, theta]
+            self.node.get_logger().info(f"Ground truth pose: x={x} y={y} theta={theta}")
+        except AttributeError as e:
+            self.node.get_logger().warn(f"Unexpected /pose message format: {e}")
+
     def update_pose(self):
         if not self.tf_buffer.can_transform("map", "base_link", rclpy.time.Time()):
-            self.node.get_logger().warn("Transform not available yet")
+            self.node.get_logger().warn(f"Transform not available yet")
             return
 
         transform = self.tf_buffer.lookup_transform(
@@ -66,7 +95,7 @@ class Turtlebot3:
         self.node.get_logger().info(
             f"Pose updated: x={(self.pose.x)} y={(self.pose.y)} theta={(self.pose.theta)}"
         )
-        self.trajectory.append([self.pose.x, self.pose.y])
+        self.estimated_pose = [self.pose.x, self.pose.y, self.pose.theta]
 
     def scan_callback(self, msg):
         front_idx = self.object_detection.get_idx(msg, 0)
@@ -100,6 +129,12 @@ class Turtlebot3:
             f"Map received {self.map_width} x {self.map_height}"
         )
 
+    def log_row(self):
+        if self.estimated_pose is not None and self.ground_truth_pose is not None:
+            row = self.estimated_pose + self.ground_truth_pose
+            self.trajectory.append(row[:3])  # traj_x, traj_y, traj_theta
+            self.ground_truth_trajectory.append(row[3:])  # gt_x, gt_y, gt_theta
+
 
 def main(args=None):
     turtlebot = None
@@ -115,7 +150,26 @@ def main(args=None):
 
     except KeyboardInterrupt:
         if turtlebot is not None:
-            data.append(turtlebot.trajectory)  # append trajectory now
+            print(len(turtlebot.trajectory))
+            print(len(turtlebot.ground_truth_trajectory))
+            # Create rows for each time step, zipping trajectory and ground truth
+            data = []
+            for traj_point, gt_point in zip(
+                turtlebot.trajectory, turtlebot.ground_truth_trajectory
+            ):
+                row = (
+                    traj_point + gt_point
+                )  # [traj_x, traj_y, traj_theta, gt_x, gt_y, gt_theta]
+                data.append(row)
+            # Save as CSV with multiple rows
+            np.savetxt(
+                os.path.join(folder, "trajectories.csv"),
+                data,
+                delimiter=",",
+                header="traj_x,traj_y,traj_theta,gt_x,gt_y,gt_theta",
+                comments="",  # No # for header
+            )
+            print(f"Trajectories saved to {folder}/trajectories.csv")
             object_poses = turtlebot.object_detection.get_objects()
             print("The saved poses are: ", object_poses)
             xs = [p[1] for p in object_poses]
@@ -131,12 +185,6 @@ def main(args=None):
             plt.grid(True)
 
             plt.show()
-            np.savetxt(
-                os.path.join(folder, "trajectory.csv"),
-                np.vstack(data),
-                delimiter=",",
-            )
-            print(f"Trajectory saved to {folder}/trajectory.csv")
 
     finally:
         np.savez(
