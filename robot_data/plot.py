@@ -22,91 +22,65 @@ import matplotlib.pyplot as plt
 # -------------------------------------------------
 # CONFIG
 # -------------------------------------------------
-# CSV_FILE = "pose_log.csv"      # timestamp,x,y,theta
-data = np.loadtxt("trajectory.csv", delimiter=",")
-
-WAYPOINTS = [
-    (0.0, 0.0),
-    (2.0, 0.0),
-    (2.0, -1.0),
-    (0.0, -1.0),
-]
-
-TOLERANCE = 0.20  # meters
+CSV_FILE = "trajectories.csv"  # traj_x,traj_y,traj_theta,gt_x,gt_y,gt_theta
 
 
 # -------------------------------------------------
 # LOAD DATA
 # -------------------------------------------------
-x = data[:, 0]
-y = data[:, 1]
+raw = pd.read_csv(CSV_FILE)
 
-# -------------------------------------------------
-# FIND CLOSEST POSE TO EACH WAYPOINT
-# -------------------------------------------------
-results = []
-
-for i, wp in enumerate(WAYPOINTS):
-    wx, wy = wp
-
-    dists = np.sqrt((x - wx) ** 2 + (y - wy) ** 2)
-
-    best_idx = np.argmin(dists)
-    best_dist = dists[best_idx]
-
-    est_x = x[best_idx]
-    est_y = y[best_idx]
-
-    passed = best_dist <= TOLERANCE
-
-    results.append(
-        {
-            "waypoint": i,
-            "target_x": wx,
-            "target_y": wy,
-            "est_x": est_x,
-            "est_y": est_y,
-            "error_m": best_dist,
-            "pass": passed,
-        }
-    )
+x = raw["traj_x"].to_numpy()[: 610]
+y = raw["traj_y"].to_numpy()[: 610]
+theta = raw["traj_theta"].to_numpy()[: 610]
+gt_x = raw["gt_x"].to_numpy()[: 610]
+gt_y = raw["gt_y"].to_numpy()[: 610]
+gt_theta = raw["gt_theta"].to_numpy()[: 610]
 
 
 # -------------------------------------------------
-# PRINT RESULTS
+# VALIDATE ESTIMATED POSE AGAINST GROUND TRUTH
 # -------------------------------------------------
-res_df = pd.DataFrame(results)
-print(res_df)
+def wrap_angle_diff(angle, reference):
+    diff = angle - reference
+    return (diff + np.pi) % (2 * np.pi) - np.pi
 
-mean_error = res_df["error_m"].mean()
-max_error = res_df["error_m"].max()
 
-print(f"\nMean waypoint error: {mean_error:.3f} m")
-print(f"Max waypoint error : {max_error:.3f} m")
+pose_error = np.sqrt((x - gt_x) ** 2 + (y - gt_y) ** 2)
+theta_error = np.abs(wrap_angle_diff(theta, gt_theta))
+
+validation_df = pd.DataFrame(
+    {
+        "traj_x": x,
+        "traj_y": y,
+        "traj_theta": theta,
+        "gt_x": gt_x,
+        "gt_y": gt_y,
+        "gt_theta": gt_theta,
+        "pos_error_m": pose_error,
+        "theta_error_rad": theta_error,
+    }
+)
+
+print(validation_df[["pos_error_m", "theta_error_rad"]].describe())
+print(f"\nMean pos error  : {pose_error.mean():.3f} m")
+print(f"Max pos error   : {pose_error.max():.3f} m")
+print(f"Mean theta error: {(theta_error).mean():.3f} rad")
+print(f"Max theta error : {(theta_error).max():.3f} rad")
 
 
 # -------------------------------------------------
-# PLOT TRAJECTORY + WAYPOINTS
+# PLOT TRAJECTORY COMPARISON
 # -------------------------------------------------
 plt.figure(figsize=(8, 6))
 
-# robot path
-plt.plot(x, y, label="Robot Path")
+plt.plot(gt_x, gt_y, linestyle="--", color="gray", label="Ground Truth Path")
+plt.plot(x, y, label="Estimated Path", linewidth=2)
 
-# target waypoints
-wp_x = [p[0] for p in WAYPOINTS]
-wp_y = [p[1] for p in WAYPOINTS]
-plt.scatter(wp_x, wp_y, s=80, label="Waypoints")
+plt.scatter(x[0], y[0], color="green", s=80, marker="o", label="Start")
+plt.scatter(x[-1], y[-1], color="red", s=80, marker="X", label="End")
 
-# estimated hit points
-plt.scatter(
-    res_df["est_x"], res_df["est_y"], s=60, marker="x", label="Closest Reached Points"
-)
-
-for _, row in res_df.iterrows():
-    plt.text(row["target_x"] + 0.03, row["target_y"] + 0.03, f"W{int(row['waypoint'])}")
-
-plt.title("Waypoint Accuracy Validation")
+plt.title("Estimated Trajectory vs Ground Truth")
 plt.xlabel("X (m)")
 plt.ylabel("Y (m)")
 plt.axis("equal")
