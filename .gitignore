@@ -5,3 +5,4 @@ log
 **.csv
 **.npz
 **.pyc
+**.pt
