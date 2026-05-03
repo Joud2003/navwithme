@@ -14,10 +14,14 @@ class ObjectDetection:
 
         if front_dist < 0.5:
             self.log_and_append(self.robot.pose.x, self.robot.pose.y, "in front")
+            return True
         if left_dist < 0.5:
             self.log_and_append(self.robot.pose.x, self.robot.pose.y, "on the left")
+            return True
         if right_dist < 0.5:
             self.log_and_append(self.robot.pose.x, self.robot.pose.y, "on the right")
+            return True
+        return False
 
     def get_idx(self, msg, angle):
         return int((angle - msg.angle_min) / msg.angle_increment)
