@@ -1,9 +1,5 @@
 import os
-from matplotlib import pyplot as plt
 import numpy as np
-
-if not hasattr(np, "float"):
-    np.float = float
 import threading
 from .object_detection import ObjectDetection
 from .motion_controller import MotionController
@@ -12,8 +8,9 @@ from tf_transformations import euler_from_quaternion
 from nav_msgs.msg import OccupancyGrid
 from geometry_msgs.msg import Twist, Pose2D
 from nav_msgs.msg import Odometry
-from sensor_msgs.msg import LaserScan
+from sensor_msgs.msg import LaserScan, Image
 from tf2_ros import Buffer, TransformListener
+from .img_object_detection import ImageProcessor
 
 
 class Turtlebot3:
@@ -38,7 +35,9 @@ class Turtlebot3:
         self.odom_sub = self.node.create_subscription(
             Odometry, "odom", self.odom_callback, 10
         )
-
+        self.img_sub = self.node.create_subscription(
+            Image, "camera/image_raw", self.image_callback, 10
+        )
         self.pose = Pose2D()
         self.ground_truth_pose = None
         self.estimated_pose = None
@@ -46,10 +45,16 @@ class Turtlebot3:
         self.ground_truth_trajectory = list()
         self.map_data = None
         self.readings = {"front": [4.0], "right": [4.0], "left": [4.0]}
+        self.object_is_detected = False
         self.resolution = 0.0
         self.trajectory = list()
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self.node)
+        self.img_data = None
+        self.img_height = None
+        self.img_width = None
+        self.img_encoding = None
+        self.images_list = []  # Store (timestamp, image, pose) tuples for YOLO
 
     def run(self):
         msg = Twist()
@@ -67,7 +72,7 @@ class Turtlebot3:
                 msg.pose.pose.orientation.z,
                 msg.pose.pose.orientation.w,
             ]
-            (_, _, yaw) = euler_from_quaternion(quaternion)
+            _, _, yaw = euler_from_quaternion(quaternion)
             theta = yaw
             self.ground_truth_pose = [x, y, theta]
             self.node.get_logger().info(f"Ground truth pose: x={x} y={y} theta={theta}")
@@ -114,7 +119,7 @@ class Turtlebot3:
         if len(self.readings["right"]) > 5:
             self.readings["right"].pop(0)
 
-        self.object_detection.detect_object(msg)
+        self.object_is_detected = self.object_detection.detect_object(msg)
 
     def map_callback(self, msg):
         self.map_width = msg.info.width
@@ -134,6 +139,11 @@ class Turtlebot3:
             row = self.estimated_pose + self.ground_truth_pose
             self.trajectory.append(row[:3])  # traj_x, traj_y, traj_theta
             self.ground_truth_trajectory.append(row[3:])  # gt_x, gt_y, gt_theta
+
+    def image_callback(self, msg):
+        if self.object_is_detected:
+            image_data = ImageProcessor(self).process_image(msg)
+            self.images_list.append(image_data)
 
 
 def main(args=None):
@@ -172,19 +182,14 @@ def main(args=None):
             print(f"Trajectories saved to {folder}/trajectories.csv")
             object_poses = turtlebot.object_detection.get_objects()
             print("The saved poses are: ", object_poses)
-            xs = [p[1] for p in object_poses]
-            ys = [p[0] for p in object_poses]
 
-            plt.figure()
-            plt.scatter(xs, ys)
-
-            plt.title("Detected Object Positions")
-            plt.xlabel("X (m)")
-            plt.ylabel("Y (m)")
-            plt.axis("equal")
-            plt.grid(True)
-
-            plt.show()
+            # Save all captured images with metadata and YOLO predictions
+            if turtlebot.images_list:
+                np.savez(
+                    os.path.join(folder, "captured_images.png"),
+                    images=turtlebot.images_list,
+                )
+                print(f"Captured images saved to {folder}/captured_images.npz")
 
     finally:
         np.savez(
