@@ -51,7 +51,6 @@ class Turtlebot3:
         self.trajectory = list()
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self.node)
-        self.img_data = None
         self.img_height = None
         self.img_width = None
         self.img_encoding = None
@@ -146,6 +145,9 @@ class Turtlebot3:
             image_data = ImageProcessor(self).process_image(msg)
             if image_data is not None:
                 self.images_list.append(image_data)
+                self.img_height = msg.height
+                self.img_width = msg.width
+                self.img_encoding = msg.encoding
 
 
 def main(args=None):
