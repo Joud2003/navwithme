@@ -2,3 +2,8 @@
 build
 install
 log
+**.csv
+**.npz
+**.pyc
+**.pt
+**.png
