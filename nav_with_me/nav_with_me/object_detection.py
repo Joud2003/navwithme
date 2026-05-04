@@ -35,9 +35,9 @@ class ObjectDetection:
         return min(valid_ranges) if valid_ranges else float("inf")
 
     def log_and_append(self, x, y, position):
-        self.robot.node.get_logger().warn(
-            f"Object detected at {position} at ({x:.2f}, {y:.2f})"
-        )
+        # self.robot.node.get_logger().warn(
+        #     f"Object detected at {position} at ({x:.2f}, {y:.2f})"
+        # )
         self.objects_poses.append((x, y))
 
     def get_objects(self):
