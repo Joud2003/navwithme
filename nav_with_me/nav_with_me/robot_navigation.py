@@ -1,5 +1,6 @@
 import os
 import numpy as np
+import cv2
 import threading
 from .object_detection import ObjectDetection
 from .motion_controller import MotionController
@@ -143,7 +144,8 @@ class Turtlebot3:
     def image_callback(self, msg):
         if self.object_is_detected:
             image_data = ImageProcessor(self).process_image(msg)
-            self.images_list.append(image_data)
+            if image_data is not None:
+                self.images_list.append(image_data)
 
 
 def main(args=None):
@@ -185,11 +187,15 @@ def main(args=None):
 
             # Save all captured images with metadata and YOLO predictions
             if turtlebot.images_list:
-                np.savez(
-                    os.path.join(folder, "captured_images.png"),
-                    images=turtlebot.images_list,
-                )
-                print(f"Captured images saved to {folder}/captured_images.npz")
+                images_folder = os.path.join(folder, "images")
+                os.makedirs(images_folder, exist_ok=True)
+                for idx, image_data in enumerate(turtlebot.images_list):
+                    img_filename = f"image_{idx:04d}.png"
+                    img_path = os.path.join(images_folder, img_filename)
+                    cv2.imwrite(
+                        img_path, cv2.cvtColor(image_data["image"], cv2.COLOR_RGB2BGR)
+                    )
+                print(f"Captured images saved to {images_folder}/")
 
     finally:
         np.savez(
