@@ -1,4 +1,7 @@
 import numpy as np
+from torch import det
+
+DIST_THRESHOLD = 0.3  # meters
 
 
 class ObjectDetection:
@@ -42,3 +45,32 @@ class ObjectDetection:
 
     def get_objects(self):
         return self.objects_poses
+
+    def is_same_object(self, obj1, obj2):
+        if obj1["class"] != obj2["class"]:
+            return False
+
+        p1 = np.array(obj1["pose"][:2])
+        p2 = np.array(obj2["pose"][:2])
+        return np.linalg.norm(p1 - p2) < DIST_THRESHOLD
+
+    def filter_objects(self, old_detections, new_detections):
+        filtered = [
+            obj.copy() for obj in old_detections
+        ]  # Start with copies of old detections
+        for det in new_detections:
+            matched = False
+            for obj in filtered:
+                if self.is_same_object(obj, det):
+                    obj["pose"] = [
+                        (obj["pose"][i] + det["pose"][i]) / 2 for i in range(3)
+                    ]
+                    obj["count"] += 1
+                    obj["conf"] = max(obj["conf"], det["conf"])
+                    matched = True
+                    break
+            if not matched:
+                det_copy = det.copy()
+                det_copy["count"] = 1
+                filtered.append(det_copy)
+        return filtered

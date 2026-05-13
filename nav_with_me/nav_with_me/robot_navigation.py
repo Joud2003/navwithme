@@ -61,6 +61,8 @@ class Turtlebot3:
         self.origin_x = 0.0
         self.origin_y = 0.0
         self.image_queue = queue.Queue(maxsize=50)
+        self.detected_objects = self.image_processor.fake_detections()
+        self.interval = 0.1
 
         # YOLO
         self.yolo_running = True
@@ -90,14 +92,19 @@ class Turtlebot3:
 
             image_data = self.image_queue.get_nowait()
 
-            detections = self.image_processor.yolo_detection(image_data["image"])
-
-        timestamp = image_data["timestamp"]
-        if detections:
-            self.detected_objects.extend(
-                [(obj, conf, timestamp) for obj, conf in detections]
+            detections = self.image_processor.yolo_detection(
+                image_data["image"], self.interval
             )
-        self.image_queue.task_done()
+
+            if detections:
+                if len(self.detected_objects) == 0:
+                    self.detected_objects = detections
+                else:
+                    self.detected_objects = self.object_detection.filter_objects(
+                        self.detected_objects, detections
+                    )
+            self.interval += 0.1
+            self.image_queue.task_done()
 
     def odom_callback(self, msg):
         try:
@@ -167,9 +174,7 @@ class Turtlebot3:
         self.origin_y = msg.info.origin.position.y
 
         self.map_data = np.array(msg.data).reshape((self.map_height, self.map_width))
-        # self.node.get_logger().info(
-        #     f"Map received {self.map_width} x {self.map_height}"
-        # )
+        self.node.get_logger().info(f"Objects received {self.detected_objects}")
 
     def log_row(self):
         if self.estimated_pose is not None and self.ground_truth_pose is not None:
@@ -229,18 +234,7 @@ def main(args=None):
             print(f"Trajectories saved to {folder}/trajectories.csv")
             object_poses = turtlebot.object_detection.get_objects()
             print("The saved poses are: ", object_poses)
-
-            # Save all captured images with metadata and YOLO predictions
-            if turtlebot.image_queue:
-                images_folder = os.path.join(folder, "images")
-                os.makedirs(images_folder, exist_ok=True)
-                for idx, image_data in enumerate(turtlebot.image_queue.queue):
-                    img_filename = f"image_{idx:04d}.png"
-                    img_path = os.path.join(images_folder, img_filename)
-                    cv2.imwrite(
-                        img_path, cv2.cvtColor(image_data["image"], cv2.COLOR_RGB2BGR)
-                    )
-                print(f"Captured images saved to {images_folder}/")
+            print(f"Deteted objects are: {turtlebot.detected_objects}")
 
     finally:
         if turtlebot is not None and turtlebot.map_data is not None:
