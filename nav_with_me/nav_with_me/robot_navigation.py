@@ -2,18 +2,20 @@ import os
 import numpy as np
 import cv2
 import threading
+import queue
 from ultralytics import YOLO
 from .object_detection import ObjectDetection
 from .motion_controller import MotionController
 import rclpy
 from tf_transformations import euler_from_quaternion
 from nav_msgs.msg import OccupancyGrid
-from geometry_msgs.msg import Twist, Pose2D
+from geometry_msgs.msg import Twist, Pose2D, PoseStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan, Image
 from tf2_ros import Buffer, TransformListener
 from .img_object_detection import ImageProcessor
-import queue
+from nav2_msgs.action import NavigateToPose
+from rclpy.action import ActionClient
 
 
 class Turtlebot3:
@@ -25,6 +27,7 @@ class Turtlebot3:
         self.rate = self.node.create_rate(1)
         self.timer = self.node.create_timer(0.1, self.update_pose)  # 10 Hz
         self.timer_2 = self.node.create_timer(0.1, self.log_row)
+        self.timer_3 = self.node.create_timer(2.0, self.send_goal)
         self.controller = MotionController(self)
         self.object_detection = ObjectDetection(self)
         self.image_processor = ImageProcessor(self)
@@ -42,6 +45,7 @@ class Turtlebot3:
         self.img_sub = self.node.create_subscription(
             Image, "camera/image_raw", self.image_callback, 10
         )
+        self.action_client = ActionClient(self.node, NavigateToPose, "navigate_to_pose")
         self.pose = Pose2D()
         self.ground_truth_pose = None
         self.estimated_pose = None
@@ -63,17 +67,20 @@ class Turtlebot3:
         self.image_queue = queue.Queue(maxsize=50)
         self.detected_objects = self.image_processor.fake_detections()
         self.interval = 0.1
+        self.way_points = self.create_waypoints()
+        self.current_index = 0
+        self.busy = False
 
         # YOLO
-        self.yolo_running = True
-        self.yolo_model = None
-        yolo_thread = threading.Thread(target=self._yolo_worker, daemon=True)
-        yolo_thread.start()
+        # self.yolo_running = True
+        # self.yolo_model = None
+        # yolo_thread = threading.Thread(target=self._yolo_worker, daemon=True)
+        # yolo_thread.start()
 
     def run(self):
         msg = Twist()
         while rclpy.ok():
-            self.controller.handleControl(self, msg)
+            # self.controller.handleControl(self, msg)
             self.rate.sleep()
 
     def _yolo_worker(self):
@@ -194,6 +201,69 @@ class Turtlebot3:
                 self.img_width = msg.width
                 self.img_encoding = msg.encoding
 
+    def create_waypoints(self):
+        def make_pose(x, y):
+            pose = PoseStamped()
+            pose.header.frame_id = "map"
+            pose.pose.position.x = x
+            pose.pose.position.y = y
+            pose.pose.position.z = 0.0
+            pose.pose.orientation.w = 1.0
+            return pose
+
+        waypoints = [
+            make_pose(0.5, 0.0),
+            make_pose(0.5, 0.5),
+            make_pose(0.0, 0.5),
+            make_pose(0.0, 0.0),
+        ]
+        return waypoints
+
+    def send_goal(self):
+        if self.busy:
+            return
+        if self.current_index >= len(self.way_points):
+            self.node.get_logger().info("All waypoints reached")
+            return
+
+        if not self.action_client.wait_for_server(timeout_sec=1.0):
+            self.node.get_logger().error("Action server not available")
+            return
+
+        goal_msg = NavigateToPose.Goal()
+        goal_msg.pose = self.way_points[self.current_index]
+        self.node.get_logger().info(
+            f"Sending goal {self.current_index}: {goal_msg.pose}"
+        )
+        self.busy = True
+        self.action_client.send_goal_async(
+            goal_msg, feedback_callback=self.feedback_callback
+        ).add_done_callback(self.goal_response_callback)
+
+    def goal_response_callback(self, future):
+        goal_handle = future.result()
+        if not goal_handle.accepted:
+            self.node.get_logger().warn("Goal rejected")
+            self.busy = False
+            self.current_index += (
+                1  # Move to next waypoint even if current goal is rejected
+            )
+            return
+
+        self.node.get_logger().info("Goal accepted")
+        self.result_future = goal_handle.get_result_async()
+        self.result_future.add_done_callback(self.result_callback)
+
+    def result_callback(self, future):
+        result = future.result().result
+        self.node.get_logger().info(f"Goal result received: {result}")
+        self.busy = False
+        self.current_index += 1
+
+    def feedback_callback(self, feedback_msg):
+        feedback = feedback_msg.feedback
+        self.node.get_logger().info(f"Feedback received: {feedback}")
+
 
 def main(args=None):
     turtlebot = None
@@ -233,7 +303,7 @@ def main(args=None):
             )
             print(f"Trajectories saved to {folder}/trajectories.csv")
             object_poses = turtlebot.object_detection.get_objects()
-            print("The saved poses are: ", object_poses)
+            # print("The saved poses are: ", object_poses)
             print(f"Deteted objects are: {turtlebot.detected_objects}")
 
     finally:
