@@ -67,9 +67,12 @@ class Turtlebot3:
         self.image_queue = queue.Queue(maxsize=50)
         self.detected_objects = self.image_processor.fake_detections()
         self.interval = 0.1
-        self.way_points = self.create_waypoints()
+        self.way_points = []
         self.current_index = 0
         self.busy = False
+        self.starting_position = None
+        self.exploration_complete = False
+        self.re_explore = False
 
         # YOLO
         # self.yolo_running = True
@@ -80,7 +83,14 @@ class Turtlebot3:
     def run(self):
         msg = Twist()
         while rclpy.ok():
-            # self.controller.handleControl(self, msg)
+            if not self.exploration_complete:
+                self.controller.handleControl(self, msg)
+            elif self.exploration_complete and not self.re_explore:
+                self.nav_to_home()
+            elif self.re_explore:
+                self.node.get_logger().info("Re-exploration started")
+                self.way_points = self.create_waypoints()
+                self.current_index = 0
             self.rate.sleep()
 
     def _yolo_worker(self):
@@ -152,6 +162,11 @@ class Turtlebot3:
         #     f"Pose updated: x={(self.pose.x)} y={(self.pose.y)} theta={(self.pose.theta)}"
         # )
         self.estimated_pose = [self.pose.x, self.pose.y, self.pose.theta]
+        self.starting_position = (
+            self.estimated_pose.copy()
+            if self.starting_position is None
+            else self.starting_position
+        )
 
     def scan_callback(self, msg):
         front_idx = self.object_detection.get_idx(msg, 0)
@@ -211,13 +226,11 @@ class Turtlebot3:
             pose.pose.orientation.w = 1.0
             return pose
 
-        waypoints = [
-            make_pose(0.5, 0.0),
-            make_pose(0.5, 0.5),
-            make_pose(0.0, 0.5),
-            make_pose(0.0, 0.0),
-        ]
-        return waypoints
+        object_waypoints = []
+        for object in self.detected_objects:
+            x, y = object["pose"][:2]
+            object_waypoints.append(make_pose(x, y))
+        return object_waypoints
 
     def send_goal(self):
         if self.busy:
@@ -257,12 +270,34 @@ class Turtlebot3:
     def result_callback(self, future):
         result = future.result().result
         self.node.get_logger().info(f"Goal result received: {result}")
+        if self.exploration_complete and not self.re_explore:
+            self.node.get_logger().info("Successfully returned home")
+            self.re_explore = True
+            self.busy = False
+            return
         self.busy = False
         self.current_index += 1
 
     def feedback_callback(self, feedback_msg):
         feedback = feedback_msg.feedback
         self.node.get_logger().info(f"Feedback received: {feedback}")
+
+    def nav_to_home(self):
+        pose = PoseStamped()
+        pose.header.frame_id = "map"
+        pose.pose.position.x = self.starting_position[0]
+        pose.pose.position.y = self.starting_position[1]
+        pose.pose.position.z = 0.0
+        pose.pose.orientation.w = 1.0
+        goal_msg = NavigateToPose.Goal()
+        goal_msg.pose = pose
+        self.node.get_logger().info(
+            f"Sending goal {self.current_index}: {goal_msg.pose}"
+        )
+        self.busy = True
+        self.action_client.send_goal_async(
+            goal_msg, feedback_callback=self.feedback_callback
+        ).add_done_callback(self.goal_response_callback)
 
 
 def main(args=None):
@@ -282,8 +317,6 @@ def main(args=None):
 
     except KeyboardInterrupt:
         if turtlebot is not None:
-            print(len(turtlebot.trajectory))
-            print(len(turtlebot.ground_truth_trajectory))
             # Create rows for each time step, zipping trajectory and ground truth
             data = []
             for traj_point, gt_point in zip(
@@ -302,8 +335,6 @@ def main(args=None):
                 comments="",  # No # for header
             )
             print(f"Trajectories saved to {folder}/trajectories.csv")
-            object_poses = turtlebot.object_detection.get_objects()
-            # print("The saved poses are: ", object_poses)
             print(f"Deteted objects are: {turtlebot.detected_objects}")
 
     finally:
