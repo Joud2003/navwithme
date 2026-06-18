@@ -1,4 +1,4 @@
-# Autonomous Hazard-Aware Mobile Robot
+# Autonomous Hazard-Aware Mobile Robot: NavWithMe
 
 ROS2-based autonomous mobile robot capable of environment exploration, mapping, localisation, hazard detection, and autonomous waypoint navigation using Gazebo simulation.
 
