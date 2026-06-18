@@ -30,7 +30,7 @@ After exploration, the robot returns to its starting position and executes an in
 
 ## System Architecture
 
-<img width="1024" height="1536" alt="System Architecture" src="https://github.com/user-attachments/assets/988bda5f-7af5-48a1-b93a-b05208e6ebca" />
+<img width="1536" height="1024" alt="System Architecture" src="https://github.com/user-attachments/assets/0c448a0b-9aa6-484b-8824-485d2dafe424" />
 
 ## Workflow
 
