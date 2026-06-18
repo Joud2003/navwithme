@@ -24,6 +24,8 @@ class Turtlebot3:
         self.node = rclpy.create_node("turtlebot3_move_square")
         self.node.get_logger().info("Pass Ctrl + C to terminate")
         self.vel_pub = self.node.create_publisher(Twist, "cmd_vel", 10)
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self.node)
         self.rate = self.node.create_rate(1)
         self.timer = self.node.create_timer(0.1, self.update_pose)  # 10 Hz
         self.timer_2 = self.node.create_timer(0.1, self.log_row)
@@ -31,8 +33,7 @@ class Turtlebot3:
         self.controller = MotionController(self)
         self.object_detection = ObjectDetection(self)
         self.image_processor = ImageProcessor(self)
-        t = threading.Thread(target=rclpy.spin, args=(self.node,), daemon=True)
-        t.start()
+
         self.lidar_sub = self.node.create_subscription(
             LaserScan, "scan", self.scan_callback, 10
         )
@@ -56,8 +57,6 @@ class Turtlebot3:
         self.object_is_detected = False
         self.resolution = 0.0
         self.trajectory = list()
-        self.tf_buffer = Buffer()
-        self.tf_listener = TransformListener(self.tf_buffer, self.node)
         self.img_height = None
         self.img_width = None
         self.img_encoding = None
@@ -74,11 +73,13 @@ class Turtlebot3:
         self.exploration_complete = False
         self.re_explore = False
 
+        t = threading.Thread(target=rclpy.spin, args=(self.node,), daemon=True)
+        t.start()
         # YOLO
-        # self.yolo_running = True
-        # self.yolo_model = None
-        # yolo_thread = threading.Thread(target=self._yolo_worker, daemon=True)
-        # yolo_thread.start()
+        self.yolo_running = True
+        self.yolo_model = None
+        yolo_thread = threading.Thread(target=self._yolo_worker, daemon=True)
+        yolo_thread.start()
 
     def run(self):
         msg = Twist()
@@ -291,9 +292,7 @@ class Turtlebot3:
         pose.pose.orientation.w = 1.0
         goal_msg = NavigateToPose.Goal()
         goal_msg.pose = pose
-        self.node.get_logger().info(
-            f"Sending goal {self.current_index}: {goal_msg.pose}"
-        )
+        self.node.get_logger().info("Navigating home")
         self.busy = True
         self.action_client.send_goal_async(
             goal_msg, feedback_callback=self.feedback_callback
