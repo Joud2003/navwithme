@@ -96,6 +96,24 @@ nav_with_me/
 * Multi-room exploration
 * Dynamic obstacle handling
 
+# Demo:
+
+Lawn-mower coverage pattern:
+
+https://github.com/user-attachments/assets/1029e76d-9c00-46e3-8356-38bb72ce4210
+
+Detected objects SLAM Map:
+
+<img width="425" height="434" alt="detected objects vs map" src="https://github.com/user-attachments/assets/26987a86-0a6c-42bc-9b95-db55fa10dac4" />
+
+Waypoint Accuracy Validation:
+
+<img width="352" height="278" alt="trajectory vs estimated" src="https://github.com/user-attachments/assets/8b4d6c8c-3f05-44ac-a201-7fc22e5f966a" />
+
+Front wall detection and stopping:
+
+https://github.com/user-attachments/assets/47f3c07c-85de-4b2b-b749-4bcda1794aff
+
 ## Author
 
 Joud Salhi
