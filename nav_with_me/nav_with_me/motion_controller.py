@@ -16,6 +16,8 @@ class MotionController:
         self.start_x = 0.0
         self.start_y = 0.0
         self.target_theta = 0.0
+        self.total_lanes = 5
+        self.current_lane = 1
 
     def normalize_angle(self, angle):
         while angle > pi:
@@ -27,6 +29,9 @@ class MotionController:
     def handleControl(self, robot, msg):
         front_dist = np.mean(self.robot.readings["front"])
         self.pd_x.setPoint(front_dist)
+        if self.current_lane >= self.total_lanes:
+            robot.exploration_complete = True
+            robot.node.get_logger().info("Exploration complete")
         if front_dist <= self.wall_threshold:
             msg.linear.x = 0.0
             robot.vel_pub.publish(msg)
@@ -35,7 +40,6 @@ class MotionController:
             # )
         if self.state == "FORWARD":
             # robot.node.get_logger().info("Forward state")
-
             if front_dist > self.wall_threshold:
                 linear_v = self.pd_x.update(self.wall_threshold)
                 if abs(linear_v) > self.forward_speed:
@@ -79,6 +83,7 @@ class MotionController:
             dx = robot.pose.x - self.start_x
             dy = robot.pose.y - self.start_y
             dist = np.sqrt(dx**2 + dy**2)
+
             # robot.node.get_logger().info(f"error is {self.lane_width - dist}")
             error = self.lane_width - dist
             if abs(error) > 0.05:
@@ -113,6 +118,7 @@ class MotionController:
                 msg.linear.x = 0.0
                 robot.vel_pub.publish(msg)
             else:
+                self.current_lane += 1
                 msg.angular.z = 0.0
                 robot.vel_pub.publish(msg)
                 self.sweep_direction *= -1
