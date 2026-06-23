@@ -96,6 +96,8 @@ nav_with_me/
 * Multi-room exploration
 * Dynamic obstacle handling
 
+The architecture supports map-referenced hazard detection through integration of YOLO detections with robot localisation data. Due to limitations of the simulation environment and the absence of suitable Gazebo object models for the target hazard classes, end-to-end validation of the object-detection pipeline was not fully completed. However, the perception, localisation, mapping, and navigation components were developed and integrated independently.
+
 # Demo:
 
 Lawn-mower coverage pattern:
