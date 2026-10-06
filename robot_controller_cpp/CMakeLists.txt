@@ -10,6 +10,7 @@ find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(geometry_msgs REQUIRED)
 find_package(sensor_msgs REQUIRED)
+find_package(nav_msgs REQUIRED)
 find_package(std_msgs REQUIRED)
 
 if(BUILD_TESTING)
@@ -26,16 +27,46 @@ endif()
 
 add_executable(robot_controller src/robot_controller.cpp)
 
+add_library(pid_controller src/motion-controller/pid_controller.cpp)
+target_include_directories(pid_controller PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+
+add_library(motion_controller src/motion-controller/motion_controller.cpp)
+target_include_directories(motion_controller PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+  $<INSTALL_INTERFACE:include>
+)
+target_link_libraries(motion_controller pid_controller)
+ament_target_dependencies(motion_controller geometry_msgs)
+
 ament_target_dependencies(robot_controller
   rclcpp
   geometry_msgs
   sensor_msgs
+  nav_msgs
   std_msgs
 )
+target_link_libraries(robot_controller motion_controller)
 
 install(TARGETS
   robot_controller
   DESTINATION lib/${PROJECT_NAME}
 )
+
+install(TARGETS pid_controller motion_controller
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
+
+install(DIRECTORY include/
+  DESTINATION include
+)
+
+ament_export_include_directories(include)
+ament_export_libraries(pid_controller motion_controller)
+ament_export_dependencies(geometry_msgs)
 
 ament_package()
