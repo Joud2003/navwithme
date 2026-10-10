@@ -2,6 +2,7 @@
 #include "sensor_msgs/msg/laser_scan.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "nav_msgs/msg/odometry.hpp"
+#include "std_msgs/msg/bool.hpp"
 #include "robot_controller_cpp/motion_controller.hpp"
 #include <algorithm>
 #include <cmath>
@@ -39,6 +40,9 @@ public:
             )
         );
         cmd_vel_publisher_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
+        exploration_completed_publisher_ =
+            this->create_publisher<std_msgs::msg::Bool>(
+                "/exploration_completed", rclcpp::QoS(1).transient_local());
     }
 
 private:
@@ -84,15 +88,11 @@ private:
                 front_readings, pose_x_, pose_y_, pose_theta_);
         }
 
-        RCLCPP_INFO(
-            this->get_logger(),
-            "Front lidar: %.2f m, command: linear=%.2f angular=%.2f",
-            front_readings,
-            cmd_vel.linear.x,
-            cmd_vel.angular.z
-        );
         if (motion_controller_.explorationComplete() && !completion_logged_) {
             RCLCPP_INFO(this->get_logger(), "Exploration complete");
+            std_msgs::msg::Bool completion_message;
+            completion_message.data = true;
+            exploration_completed_publisher_->publish(completion_message);
             completion_logged_ = true;
         }
         cmd_vel_publisher_->publish(cmd_vel);
@@ -102,6 +102,7 @@ private:
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr lidar_subscription_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_publisher_;
+    rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr exploration_completed_publisher_;
     double pose_x_;
     double pose_y_;
     double pose_theta_;
