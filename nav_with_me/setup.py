@@ -22,7 +22,10 @@ setup(
         ("share/" + package_name, ["package.xml"]),
         (
             "share/" + package_name + "/launch",
-            ["launch/custom_turtlebot3_world.launch.py"],
+            [
+                "launch/custom_turtlebot3_world.launch.py",
+                "launch/run_both_nodes.launch.py",
+            ],
         ),
     ],
     entry_points={

@@ -1,17 +1,17 @@
 import os
 import numpy as np
-import cv2
 import threading
 import queue
 from ultralytics import YOLO
 from .object_detection import ObjectDetection
-from .motion_controller import MotionController
 import rclpy
+from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 from tf_transformations import euler_from_quaternion
 from nav_msgs.msg import OccupancyGrid
 from geometry_msgs.msg import Twist, Pose2D, PoseStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan, Image
+from std_msgs.msg import Bool
 from tf2_ros import Buffer, TransformListener
 from .img_object_detection import ImageProcessor
 from nav2_msgs.action import NavigateToPose
@@ -23,14 +23,11 @@ class Turtlebot3:
         rclpy.init()
         self.node = rclpy.create_node("turtlebot3_move_square")
         self.node.get_logger().info("Pass Ctrl + C to terminate")
-        self.vel_pub = self.node.create_publisher(Twist, "cmd_vel", 10)
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self.node)
         self.rate = self.node.create_rate(1)
         self.timer = self.node.create_timer(0.1, self.update_pose)  # 10 Hz
         self.timer_2 = self.node.create_timer(0.1, self.log_row)
-        self.timer_3 = self.node.create_timer(2.0, self.send_goal)
-        self.controller = MotionController(self)
         self.object_detection = ObjectDetection(self)
         self.image_processor = ImageProcessor(self)
 
@@ -45,6 +42,12 @@ class Turtlebot3:
         )
         self.img_sub = self.node.create_subscription(
             Image, "camera/image_raw", self.image_callback, 10
+        )
+        self.exploration_completed_sub = self.node.create_subscription(
+            Bool,
+            "/exploration_completed",
+            self.exploration_completed_callback,
+            QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL),
         )
         self.action_client = ActionClient(self.node, NavigateToPose, "navigate_to_pose")
         self.pose = Pose2D()
@@ -82,10 +85,9 @@ class Turtlebot3:
         yolo_thread.start()
 
     def run(self):
-        msg = Twist()
         while rclpy.ok():
             if not self.exploration_complete:
-                self.controller.handleControl(self, msg)
+                self.node.get_logger().info("Exploration in progress")
             elif self.exploration_complete and not self.re_explore:
                 self.nav_to_home()
             elif self.re_explore:
@@ -93,6 +95,12 @@ class Turtlebot3:
                 self.way_points = self.create_waypoints()
                 self.current_index = 0
             self.rate.sleep()
+
+    def exploration_completed_callback(self, msg):
+        if msg.data == True:
+            self.node.get_logger().info(
+                "C++ motion controller reports exploration complete"
+            )
 
     def _yolo_worker(self):
         self.node.get_logger().info("Starting YOLO worker thread")
@@ -284,6 +292,7 @@ class Turtlebot3:
         self.node.get_logger().info(f"Feedback received: {feedback}")
 
     def nav_to_home(self):
+        self.timer_3 = self.node.create_timer(2.0, self.send_goal)
         pose = PoseStamped()
         pose.header.frame_id = "map"
         pose.pose.position.x = self.starting_position[0]
