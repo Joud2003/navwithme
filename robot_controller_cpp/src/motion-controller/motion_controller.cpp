@@ -1,6 +1,7 @@
 #include "robot_controller_cpp/motion_controller.hpp"
 
 #include <cmath>
+#include <iostream>
 #include <limits>
 
 namespace
@@ -38,6 +39,7 @@ geometry_msgs::msg::Twist MotionController::handleControl(
 
   if (current_lane_ >= total_lanes_) {
     exploration_complete_ = true;
+    std::cout << "Exploration complete. Total lanes covered: " << current_lane_ << std::endl;
     return command;
   }
 
@@ -48,7 +50,9 @@ geometry_msgs::msg::Twist MotionController::handleControl(
         const double speed = clamp(
           distance_controller_.update(wall_threshold_), -forward_speed_, forward_speed_);
         command.linear.x = std::abs(speed);
+        command.angular.z = 0.0;
       } else {
+        command.linear.x = 0.0;
         target_theta_ = normalizeAngle(theta + sweep_direction_ * (kPi / 2.0));
         heading_controller_.setPoint(target_theta_);
         state_ = State::Turn1;
@@ -78,7 +82,10 @@ geometry_msgs::msg::Twist MotionController::handleControl(
         const double speed = clamp(
           distance_controller_.update(distance), -forward_speed_, forward_speed_);
         command.linear.x = std::abs(speed);
+        command.angular.z = 0.0;
       } else {
+        command.linear.x = 0.0;
+        command.angular.z = 0.0;
         target_theta_ = normalizeAngle(theta + sweep_direction_ * (kPi / 2.0));
         heading_controller_.setPoint(target_theta_);
         state_ = State::Turn2;
@@ -92,12 +99,17 @@ geometry_msgs::msg::Twist MotionController::handleControl(
         command.angular.z = clamp(heading_controller_.update(theta), -0.2, 0.3);
         command.linear.x = 0.0;
       } else {
-        ++current_lane_;
+        current_lane_++;
+        command.angular.z = 0.0;
         sweep_direction_ *= -1;
         state_ = State::Forward;
       }
       break;
     }
+    default:
+      command.linear.x = 0.0;
+      command.angular.z = 0.0;
+      break;
   }
 
   return command;
