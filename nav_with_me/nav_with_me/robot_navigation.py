@@ -89,6 +89,7 @@ class Turtlebot3:
             if not self.exploration_complete:
                 self.node.get_logger().info("Exploration in progress")
             elif self.exploration_complete and not self.re_explore:
+                self.node.get_logger().info("Navigating home")
                 self.nav_to_home()
             elif self.re_explore:
                 self.node.get_logger().info("Re-exploration started")
@@ -101,6 +102,7 @@ class Turtlebot3:
             self.node.get_logger().info(
                 "C++ motion controller reports exploration complete"
             )
+            self.exploration_complete = True
 
     def _yolo_worker(self):
         self.node.get_logger().info("Starting YOLO worker thread")
