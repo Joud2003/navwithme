@@ -61,6 +61,10 @@ private:
 
     void lidar_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
     {
+        if (completion_logged_) {
+            RCLCPP_INFO(this->get_logger(), "Exploration already complete, ignoring LIDAR data");
+            return;
+        }
         float front_readings = std::numeric_limits<float>::infinity();
         constexpr float front_angle = 0.2617994f;
         bool has_no_return = false;
