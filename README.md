@@ -121,9 +121,10 @@ The architecture supports map-referenced hazard detection through integration of
 
 # Demo:
 
-Lawn-mower coverage pattern:
+Lawn-mower coverage pattern with navigation home:
 
-https://github.com/user-attachments/assets/1029e76d-9c00-46e3-8356-38bb72ce4210
+https://github.com/user-attachments/assets/527cadc1-018b-45ed-b41b-63e910991c1a
+
 
 Detected objects SLAM Map:
 
