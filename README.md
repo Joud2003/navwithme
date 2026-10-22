@@ -1,14 +1,15 @@
 # Autonomous Hazard-Aware Mobile Robot: NavWithMe
 
-ROS2-based autonomous mobile robot capable of environment exploration, mapping, localisation, hazard detection, and autonomous waypoint navigation using Gazebo simulation.
+ROS 2 project with a Python perception node and a C++ motion-control node for TurtleBot3 simulation, environment exploration, mapping, and hazard detection.
 
 ## Overview
 
 The aim of this project is to develop an autonomous mobile robot that explores an environment, detects potentially dangerous items from a user-defined list using vision-based perception, localises these items with confidence filtering, and then generates navigation behaviour that allows the robot to guide an operator to the detected hazards for inspection or intervention.
+The project explores a two-node architecture: Python handles sensor-based perception, while C++ controls the robot's exploration motion.
 
-The system integrates autonomous exploration, real-time mapping, perception-driven hazard identification, and Nav2-based navigation to hazardous locations while maintaining robust localisation throughout operation.
+The C++ node reads `/scan` and `/odom`, runs a PD-based coverage controller, and publishes velocity commands on `/cmd_vel`. The Python node processes LiDAR and camera data, runs YOLO classification, and listens for the C++ node's `/exploration_completed` status event.
 
-During operation, the robot performs structured exploration using a lawn-mower coverage pattern while simultaneously building an occupancy grid map and localising itself using SLAM Toolbox.
+During exploration, SLAM Toolbox can build an occupancy grid while the C++ controller follows a lawn-mower pattern. The Python node currently logs the completion event; it does not yet pass detected-object data to the C++ controller or trigger the Python Nav2 return/waypoint behavior from that event.
 
 Potential objects are detected using LiDAR-based cues, then confirmed using camera images processed through a YOLO-based classification model. Valid hazard detections are filtered, clustered spatially, and stored in map coordinates with associated confidence scores.
 
@@ -18,14 +19,13 @@ After exploration, the robot returns to its starting position and executes an in
 
 * ROS2-based modular architecture
 * TurtleBot3 simulation in Gazebo
-* PID waypoint control
-* Lawn-mower (boustrophedon) coverage navigation
+* C++ PD-based lawn-mower coverage control
+* Python LiDAR and camera perception
+* YOLO-based object classification and detection filtering
+* ROS topic notification when C++ exploration completes
 * SLAM Toolbox mapping and localisation
 * Occupancy grid generation
-* LiDAR-based object detection
-* Detection clustering and filtering
-* YOLO-based object classification
-* Nav2 waypoint navigation and path planning
+* Nav2 action-client and waypoint components
 * Localisation and trajectory validation tools
 
 ## System Architecture
@@ -36,20 +36,17 @@ Disclaimer: generated using AI
 
 ## Workflow
 
-1. Explore environment using lawn-mower navigation.
-2. Build occupancy grid map using SLAM Toolbox.
-3. Detect candidate objects using LiDAR.
-4. Capture camera images when objects are detected.
-5. Classify objects using YOLO.
-6. Filter duplicate detections using spatial clustering.
-7. Store hazard locations in map coordinates.
-8. Return to starting position.
-9. Navigate to detected hazards using Nav2.
+1. Launch the simulator, Python perception node, and C++ motion-control node.
+2. The C++ node uses LiDAR and odometry to execute the configured coverage pattern and publishes commands on `/cmd_vel`.
+3. The Python node processes LiDAR cues and camera images, classifies candidate objects, and records detections.
+4. When the C++ controller completes exploration, it publishes `true` on `/exploration_completed`; Python logs the event and initiates return home using Nav2.
+5. Upon returning to the start position, Nav2 is used to renavigate through detected hazards.
 
 ## Technologies
 
 * ROS2 Humble
 * Python
+* C++
 * Gazebo Classic
 * TurtleBot3
 * Nav2
@@ -77,15 +74,39 @@ Example results:
 ## Repository Structure
 
 ```text
-nav_with_me/
-├── launch/
-├── constants/
-├── robot_navigation/
-├── pid_controller/
-├── img_object_detection/
-├── motion_controller/
+.
+├── nav_with_me/
+│   ├── launch/
+│   │   ├── custom_turtlebot3_world.launch.py
+│   │   └── run_both_nodes.launch.py
+│   ├── nav_with_me/
+│   │   ├── constants.py
+│   │   ├── img_object_detection.py
+│   │   ├── motion_controller.py
+│   │   ├── object_detection.py
+│   │   ├── pid_controller.py
+│   │   └── robot_navigation.py
+│   ├── test/
+│   ├── GAZEBO_TESTING_GUIDE.md
+│   ├── my_world.world
+│   ├── package.xml
+│   ├── setup.cfg
+│   └── setup.py
+├── robot_controller_cpp/
+│   ├── include/robot_controller_cpp/
+│   │   ├── motion_controller.hpp
+│   │   └── pid_controller.hpp
+│   ├── src/
+│   │   ├── motion-controller/
+│   │   │   ├── motion_controller.cpp
+│   │   │   └── pid_controller.cpp
+│   │   └── robot_controller.cpp
+│   ├── CMakeLists.txt
+│   └── package.xml
 ├── robot_data/
-└── test/
+├── yolov8n.pt
+├── yolov9c.pt
+└── README.md
 ```
 
 ## Future Improvements
