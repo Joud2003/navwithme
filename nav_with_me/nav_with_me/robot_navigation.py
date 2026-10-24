@@ -74,7 +74,7 @@ class Turtlebot3:
         self.interval = 0.1
         self.way_points = []
         self.current_index = 0
-        self.starting_position = [0.0, 0]
+        self.starting_position = None
         self.exploration_complete = False
         self.re_explore = False
         self.home_goal_sent = False
@@ -97,9 +97,7 @@ class Turtlebot3:
 
     def run(self):
         while rclpy.ok():
-            if not self.exploration_complete:
-                self.node.get_logger().info("Exploration in progress")
-            elif not self.yolo_ready.is_set():
+            if not self.yolo_ready.is_set():
                 if self.yolo_load_failed and not self.yolo_wait_logged:
                     self.node.get_logger().error(
                         "YOLO failed to load; navigation will not start"
@@ -110,6 +108,8 @@ class Turtlebot3:
                         "Waiting for YOLO model before starting navigation"
                     )
                     self.yolo_wait_logged = True
+            elif not self.exploration_complete:
+                self.node.get_logger().info("Exploration in progress")
             elif not self.home_goal_sent:
                 self.node.get_logger().info("Navigating home...")
                 self.nav_home()
