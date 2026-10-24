@@ -19,7 +19,9 @@ public:
           pose_y_(0.0),
           pose_theta_(0.0),
           pose_received_(false),
-          completion_logged_(false)
+          completion_logged_(false),
+          perception_ready_(false),
+          readiness_logged_(false)
     {
         lidar_subscription_ = this->create_subscription<sensor_msgs::msg::LaserScan>(
             "/scan",
@@ -39,6 +41,15 @@ public:
                 std::placeholders::_1
             )
         );
+        perception_ready_subscription_ = this->create_subscription<std_msgs::msg::Bool>(
+            "/perception_ready",
+            rclcpp::QoS(1).transient_local(),
+            std::bind(
+                &RobotController::perception_ready_callback,
+                this,
+                std::placeholders::_1
+            )
+        );
         cmd_vel_publisher_ = this->create_publisher<geometry_msgs::msg::Twist>("/cmd_vel", 10);
         exploration_completed_publisher_ =
             this->create_publisher<std_msgs::msg::Bool>(
@@ -46,6 +57,14 @@ public:
     }
 
 private:
+    void perception_ready_callback(const std_msgs::msg::Bool::SharedPtr msg)
+    {
+        perception_ready_ = msg->data;
+        if (perception_ready_) {
+            RCLCPP_INFO(this->get_logger(), "Perception ready; starting exploration");
+        }
+    }
+
     void odometry_callback(const nav_msgs::msg::Odometry::SharedPtr msg)
     {
         pose_x_ = msg->pose.pose.position.x;
@@ -62,7 +81,14 @@ private:
     void lidar_callback(const sensor_msgs::msg::LaserScan::SharedPtr msg)
     {
         if (completion_logged_) {
-            RCLCPP_INFO(this->get_logger(), "Exploration already complete, ignoring LIDAR data");
+            return;
+        }
+        if (!perception_ready_) {
+            if (!readiness_logged_) {
+                RCLCPP_INFO(this->get_logger(), "Waiting for YOLO");
+                readiness_logged_ = true;
+            }
+            cmd_vel_publisher_->publish(geometry_msgs::msg::Twist{});
             return;
         }
         float front_readings = std::numeric_limits<float>::infinity();
@@ -105,6 +131,7 @@ private:
     MotionController motion_controller_;
     rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr lidar_subscription_;
     rclcpp::Subscription<nav_msgs::msg::Odometry>::SharedPtr odometry_subscription_;
+    rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr perception_ready_subscription_;
     rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_publisher_;
     rclcpp::Publisher<std_msgs::msg::Bool>::SharedPtr exploration_completed_publisher_;
     double pose_x_;
@@ -112,6 +139,8 @@ private:
     double pose_theta_;
     bool pose_received_;
     bool completion_logged_;
+    bool perception_ready_;
+    bool readiness_logged_;
 };
 
 int main(int argc, char * argv[])
