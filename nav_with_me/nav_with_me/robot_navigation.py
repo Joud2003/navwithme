@@ -8,14 +8,13 @@ import rclpy
 from rclpy.qos import QoSProfile, QoSDurabilityPolicy
 from tf_transformations import euler_from_quaternion
 from nav_msgs.msg import OccupancyGrid
-from geometry_msgs.msg import Twist, Pose2D, PoseStamped
+from geometry_msgs.msg import Pose2D, PoseStamped
 from nav_msgs.msg import Odometry
 from sensor_msgs.msg import LaserScan, Image
 from std_msgs.msg import Bool
 from tf2_ros import Buffer, TransformListener
 from .img_object_detection import ImageProcessor
-from nav2_msgs.action import NavigateToPose
-from rclpy.action import ActionClient
+from .nav2_goal_manager import Nav2GoalManager
 
 
 class Turtlebot3:
@@ -49,7 +48,11 @@ class Turtlebot3:
             self.exploration_completed_callback,
             QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL),
         )
-        self.action_client = ActionClient(self.node, NavigateToPose, "navigate_to_pose")
+        self.perception_ready_pub = self.node.create_publisher(
+            Bool,
+            "/perception_ready",
+            QoSProfile(depth=1, durability=QoSDurabilityPolicy.TRANSIENT_LOCAL),
+        )
         self.pose = Pose2D()
         self.ground_truth_pose = None
         self.estimated_pose = None
@@ -71,10 +74,18 @@ class Turtlebot3:
         self.interval = 0.1
         self.way_points = []
         self.current_index = 0
-        self.busy = False
-        self.starting_position = None
+        self.starting_position = [0.0, 0]
         self.exploration_complete = False
         self.re_explore = False
+        self.home_goal_sent = False
+        self.waypoints_initialized = False
+        self.mission_complete = False
+        self.nav_goal_manager = Nav2GoalManager(
+            self.node, self.navigation_result_callback
+        )
+        self.yolo_ready = threading.Event()
+        self.yolo_load_failed = False
+        self.yolo_wait_logged = False
 
         t = threading.Thread(target=rclpy.spin, args=(self.node,), daemon=True)
         t.start()
@@ -88,13 +99,22 @@ class Turtlebot3:
         while rclpy.ok():
             if not self.exploration_complete:
                 self.node.get_logger().info("Exploration in progress")
-            elif self.exploration_complete and not self.re_explore:
-                self.node.get_logger().info("Navigating home")
-                self.nav_to_home()
-            elif self.re_explore:
-                self.node.get_logger().info("Re-exploration started")
-                self.way_points = self.create_waypoints()
-                self.current_index = 0
+            elif not self.yolo_ready.is_set():
+                if self.yolo_load_failed and not self.yolo_wait_logged:
+                    self.node.get_logger().error(
+                        "YOLO failed to load; navigation will not start"
+                    )
+                    self.yolo_wait_logged = True
+                elif not self.yolo_wait_logged:
+                    self.node.get_logger().info(
+                        "Waiting for YOLO model before starting navigation"
+                    )
+                    self.yolo_wait_logged = True
+            elif not self.home_goal_sent:
+                self.node.get_logger().info("Navigating home...")
+                self.nav_home()
+            elif self.re_explore and not self.mission_complete:
+                self.navigate_to_detected_objects()
             self.rate.sleep()
 
     def exploration_completed_callback(self, msg):
@@ -112,7 +132,15 @@ class Turtlebot3:
             self.node.get_logger().info("YOLO model loaded successfully")
         except Exception as e:
             self.node.get_logger().error(f"Failed to load YOLO model: {e}")
+            self.yolo_load_failed = True
             return
+        self.yolo_ready.set()
+        ready_msg = Bool()
+        ready_msg.data = True
+        self.perception_ready_pub.publish(ready_msg)
+        self.node.get_logger().info(
+            "YOLO is ready; exploration and navigation are enabled"
+        )
 
         while self.yolo_running:
             if not self.image_queue.qsize() > 0:
@@ -131,6 +159,7 @@ class Turtlebot3:
                     self.detected_objects = self.object_detection.filter_objects(
                         self.detected_objects, detections
                     )
+            self.node.get_logger().info(f"Detected objects: {self.detected_objects}")
             self.interval += 0.1
             self.image_queue.task_done()
 
@@ -243,71 +272,55 @@ class Turtlebot3:
             object_waypoints.append(make_pose(x, y))
         return object_waypoints
 
-    def send_goal(self):
-        if self.busy:
+    def navigate_to_detected_objects(self):
+        if not self.waypoints_initialized:
+            self.node.get_logger().info("Starting detected-object waypoint navigation")
+            self.way_points = self.create_waypoints()
+            self.current_index = 0
+            self.waypoints_initialized = True
+
+        if self.nav_goal_manager.busy:
             return
+
         if self.current_index >= len(self.way_points):
-            self.node.get_logger().info("All waypoints reached")
+            self.node.get_logger().info("All detected-object waypoints reached")
+            self.mission_complete = True
             return
 
-        if not self.action_client.wait_for_server(timeout_sec=1.0):
-            self.node.get_logger().error("Action server not available")
+        self.nav_goal_manager.send_goal(self.way_points[self.current_index], "object")
+
+    def navigation_result_callback(self, goal_type, succeeded):
+        if goal_type == "home":
+            if succeeded:
+                self.node.get_logger().info("Successfully returned home")
+                self.re_explore = True
+            else:
+                self.node.get_logger().error(
+                    "Return-home goal failed; object navigation will not start"
+                )
             return
 
-        goal_msg = NavigateToPose.Goal()
-        goal_msg.pose = self.way_points[self.current_index]
-        self.node.get_logger().info(
-            f"Sending goal {self.current_index}: {goal_msg.pose}"
-        )
-        self.busy = True
-        self.action_client.send_goal_async(
-            goal_msg, feedback_callback=self.feedback_callback
-        ).add_done_callback(self.goal_response_callback)
+        if not succeeded:
+            self.node.get_logger().warn(
+                f"Object waypoint {self.current_index} failed; moving to next"
+            )
+        self.current_index += 1
 
-    def goal_response_callback(self, future):
-        goal_handle = future.result()
-        if not goal_handle.accepted:
-            self.node.get_logger().warn("Goal rejected")
-            self.busy = False
-            self.current_index += (
-                1  # Move to next waypoint even if current goal is rejected
+    def nav_home(self):
+        if self.starting_position is None:
+            self.node.get_logger().warn(
+                "Waiting for the starting pose before returning home"
             )
             return
 
-        self.node.get_logger().info("Goal accepted")
-        self.result_future = goal_handle.get_result_async()
-        self.result_future.add_done_callback(self.result_callback)
-
-    def result_callback(self, future):
-        result = future.result().result
-        self.node.get_logger().info(f"Goal result received: {result}")
-        if self.exploration_complete and not self.re_explore:
-            self.node.get_logger().info("Successfully returned home")
-            self.re_explore = True
-            self.busy = False
-            return
-        self.busy = False
-        self.current_index += 1
-
-    def feedback_callback(self, feedback_msg):
-        feedback = feedback_msg.feedback
-        self.node.get_logger().info(f"Feedback received: {feedback}")
-
-    def nav_to_home(self):
-        self.timer_3 = self.node.create_timer(2.0, self.send_goal)
         pose = PoseStamped()
         pose.header.frame_id = "map"
         pose.pose.position.x = self.starting_position[0]
         pose.pose.position.y = self.starting_position[1]
         pose.pose.position.z = 0.0
         pose.pose.orientation.w = 1.0
-        goal_msg = NavigateToPose.Goal()
-        goal_msg.pose = pose
-        self.node.get_logger().info("Navigating home")
-        self.busy = True
-        self.action_client.send_goal_async(
-            goal_msg, feedback_callback=self.feedback_callback
-        ).add_done_callback(self.goal_response_callback)
+        if self.nav_goal_manager.send_goal(pose, "home"):
+            self.home_goal_sent = True
 
 
 def main(args=None):
