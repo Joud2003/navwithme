@@ -79,6 +79,7 @@ class Turtlebot3:
         self.exploration_complete = False
         self.re_explore = False
         self.home_goal_sent = False
+        self.final_home_goal_sent = False
         self.waypoints_initialized = False
         self.mission_complete = False
         self.nav_goal_manager = Nav2GoalManager(
@@ -116,9 +117,9 @@ class Turtlebot3:
                 self.nav_home()
             elif self.re_explore and not self.mission_complete:
                 self.navigate_to_detected_objects()
-            elif self.mission_complete:
+            elif self.mission_complete and not self.final_home_goal_sent:
                 self.node.get_logger().info("Mission complete; returning home")
-                self.nav_home()
+                self.final_home_goal_sent = self.nav_home()
             self.rate.sleep()
 
     def exploration_completed_callback(self, msg):
@@ -328,6 +329,8 @@ class Turtlebot3:
         pose.pose.orientation.w = 1.0
         if self.nav_goal_manager.send_goal(pose, "home"):
             self.home_goal_sent = True
+            return True
+        return False
 
 
 def main(args=None):
