@@ -9,11 +9,11 @@ The project explores a two-node architecture: Python handles sensor-based percep
 
 The C++ node reads `/scan` and `/odom`, runs a PD-based coverage controller, and publishes velocity commands on `/cmd_vel`. The Python node processes LiDAR and camera data, runs YOLO classification, and listens for the C++ node's `/exploration_completed` status event.
 
-During exploration, SLAM Toolbox can build an occupancy grid while the C++ controller follows a lawn-mower pattern. The Python node currently logs the completion event; it does not yet pass detected-object data to the C++ controller or trigger the Python Nav2 return/waypoint behavior from that event.
+During exploration, SLAM Toolbox can build an occupancy grid while the C++ controller follows a lawn-mower pattern. When exploration completes, the C++ node publishes `/exploration_completed`. The Python node receives this event and uses Nav2 to return the robot to its starting position. After the return-home goal succeeds, Python creates and sends Nav2 waypoints for detected objects only; it does not navigate to arbitrary map locations.
 
 Potential objects are detected using LiDAR-based cues, then confirmed using camera images processed through a YOLO-based classification model. Valid hazard detections are filtered, clustered spatially, and stored in map coordinates with associated confidence scores.
 
-After exploration, the robot returns to its starting position and executes an intervention phase where it autonomously navigates to detected hazard locations using Nav2.
+After exploration, the robot first returns to its starting position. It then uses Nav2 to visit the locations of detected objects only.
 
 ## Features
 
@@ -39,8 +39,8 @@ Disclaimer: generated using AI
 1. Launch the simulator, Python perception node, and C++ motion-control node.
 2. The C++ node uses LiDAR and odometry to execute the configured coverage pattern and publishes commands on `/cmd_vel`.
 3. The Python node processes LiDAR cues and camera images, classifies candidate objects, and records detections.
-4. When the C++ controller completes exploration, it publishes `true` on `/exploration_completed`; Python logs the event and initiates return home using Nav2.
-5. Upon returning to the start position, Nav2 is used to renavigate through detected hazards.
+4. When the C++ controller completes exploration, it publishes `true` on `/exploration_completed`; Python receives the event and sends a Nav2 goal to the robot's starting position.
+5. After the return-home goal succeeds, Python sends Nav2 goals for the detected-object locations. No waypoint is created for an object that was not detected.
 
 ## Technologies
 
