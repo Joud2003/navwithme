@@ -1,19 +1,16 @@
 # Autonomous Hazard-Aware Mobile Robot: NavWithMe
 
-ROS 2 project with a Python perception node and a C++ motion-control node for TurtleBot3 simulation, environment exploration, mapping, and hazard detection.
+ROS 2 project with Python perception and mission coordination plus a C++ motion-control node for TurtleBot3 simulation, environment exploration, mapping, and hazard-detection experiments.
 
 ## Overview
 
-The aim of this project is to develop an autonomous mobile robot that explores an environment, detects potentially dangerous items from a user-defined list using vision-based perception, localises these items with confidence filtering, and then generates navigation behaviour that allows the robot to guide an operator to the detected hazards for inspection or intervention.
-The project explores a two-node architecture: Python handles sensor-based perception, while C++ controls the robot's exploration motion.
+The project explores an environment with a lawn-mower coverage controller, classifies candidate objects from camera images, and tests navigation to the resulting map-referenced waypoints. Python handles perception and mission coordination; C++ handles low-level exploration motion.
 
-The C++ node reads `/scan` and `/odom`, runs a PD-based coverage controller, and publishes velocity commands on `/cmd_vel`. The Python node processes LiDAR and camera data, runs YOLO classification, and listens for the C++ node's `/exploration_completed` status event.
+The C++ node reads `/scan` and `/odom`, runs a PD-based coverage controller, and publishes velocity commands on `/cmd_vel`. It waits for `/perception_ready` before moving and publishes `/exploration_completed` when coverage ends. The Python node processes LiDAR and camera data, runs YOLO classification, and coordinates Nav2 goals.
 
-During exploration, SLAM Toolbox can build an occupancy grid while the C++ controller follows a lawn-mower pattern. When exploration completes, the C++ node publishes `/exploration_completed`. The Python node receives this event and uses Nav2 to return the robot to its starting position. After the return-home goal succeeds, Python creates and sends Nav2 waypoints for detected objects only; it does not navigate to arbitrary map locations.
+The `run_both_nodes.launch.py` launch file starts the project's C++ and Python nodes. Gazebo, SLAM Toolbox, and Nav2 must be started separately. SLAM Toolbox can build the occupancy grid while the C++ controller follows its coverage pattern.
 
-Potential objects are detected using LiDAR-based cues, then confirmed using camera images processed through a YOLO-based classification model. Valid hazard detections are filtered, clustered spatially, and stored in map coordinates with associated confidence scores.
-
-After exploration, the robot first returns to its starting position. It then uses Nav2 to visit the locations of detected objects only.
+LiDAR proximity is used to decide when to process a camera frame. YOLO filters detections by confidence and the configured harmful-object classes. The current implementation associates each accepted detection with the robot's estimated map pose at the time of processing; it does not calculate metric object position from the camera image itself. Nearby detections of the same class are merged.
 
 ## Features
 
@@ -22,10 +19,12 @@ After exploration, the robot first returns to its starting position. It then use
 * C++ PD-based lawn-mower coverage control
 * Python LiDAR and camera perception
 * YOLO-based object classification and detection filtering
-* ROS topic notification when C++ exploration completes
+* `/perception_ready` handshake: C++ waits for perception initialization before exploring
+* `/exploration_completed` notification from C++ to Python
 * SLAM Toolbox mapping and localisation
 * Occupancy grid generation
-* Nav2 action-client and waypoint components
+* Nav2 return-home and detected-object waypoint navigation
+* Optional synthetic detection mode for testing without loading YOLO
 * Localisation and trajectory validation tools
 
 ## System Architecture
@@ -36,11 +35,19 @@ Disclaimer: generated using AI
 
 ## Workflow
 
-1. Launch the simulator, Python perception node, and C++ motion-control node.
-2. The C++ node uses LiDAR and odometry to execute the configured coverage pattern and publishes commands on `/cmd_vel`.
-3. The Python node processes LiDAR cues and camera images, classifies candidate objects, and records detections.
-4. When the C++ controller completes exploration, it publishes `true` on `/exploration_completed`; Python receives the event and sends a Nav2 goal to the robot's starting position.
-5. After the return-home goal succeeds, Python sends Nav2 goals for the detected-object locations. No waypoint is created for an object that was not detected.
+1. Start Gazebo, SLAM Toolbox, and Nav2 with compatible simulation-time and TF settings.
+2. Start both project nodes with `ros2 launch nav_with_me run_both_nodes.launch.py`.
+3. Python loads YOLO and publishes `true` on `/perception_ready`; in fake mode it skips model loading and publishes the same readiness signal. C++ holds the robot stopped until this signal arrives.
+4. The C++ controller uses LiDAR and odometry to execute the lawn-mower path and publishes `true` on `/exploration_completed` when finished.
+5. Python sends a Nav2 goal to the starting position, then visits waypoints generated from detected-object poses, and finally sends one return-home goal.
+
+To test the detection and waypoint flow without loading YOLO, launch with:
+
+```bash
+ros2 launch nav_with_me run_both_nodes.launch.py use_fake_detections:=true
+```
+
+Fake mode generates a synthetic `knife` detection near the robot's current estimated pose. It tests the software flow, not camera detection accuracy or true object localization.
 
 ## Technologies
 
@@ -82,9 +89,8 @@ Example results:
 │   ├── nav_with_me/
 │   │   ├── constants.py
 │   │   ├── img_object_detection.py
-│   │   ├── motion_controller.py
+│   │   ├── nav2_goal_manager.py
 │   │   ├── object_detection.py
-│   │   ├── pid_controller.py
 │   │   └── robot_navigation.py
 │   ├── test/
 │   ├── GAZEBO_TESTING_GUIDE.md
