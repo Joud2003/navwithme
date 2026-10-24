@@ -21,6 +21,8 @@ class Turtlebot3:
     def __init__(self):
         rclpy.init()
         self.node = rclpy.create_node("turtlebot3_move_square")
+        self.node.declare_parameter("use_fake_detections", False)
+        self.use_fake_detections = self.node.get_parameter("use_fake_detections").value
         self.node.get_logger().info("Pass Ctrl + C to terminate")
         self.tf_buffer = Buffer()
         self.tf_listener = TransformListener(self.tf_buffer, self.node)
@@ -70,7 +72,6 @@ class Turtlebot3:
         self.origin_x = 0.0
         self.origin_y = 0.0
         self.image_queue = queue.Queue(maxsize=50)
-        self.detected_objects = self.image_processor.fake_detections()
         self.interval = 0.1
         self.way_points = []
         self.current_index = 0
@@ -115,6 +116,9 @@ class Turtlebot3:
                 self.nav_home()
             elif self.re_explore and not self.mission_complete:
                 self.navigate_to_detected_objects()
+            elif self.mission_complete:
+                self.node.get_logger().info("Mission complete; returning home")
+                self.nav_home()
             self.rate.sleep()
 
     def exploration_completed_callback(self, msg):
@@ -125,21 +129,26 @@ class Turtlebot3:
             self.exploration_complete = True
 
     def _yolo_worker(self):
-        self.node.get_logger().info("Starting YOLO worker thread")
+        self.node.get_logger().info("Starting perception worker thread")
 
-        try:
-            self.yolo_model = YOLO("yolov8n.pt")
-            self.node.get_logger().info("YOLO model loaded successfully")
-        except Exception as e:
-            self.node.get_logger().error(f"Failed to load YOLO model: {e}")
-            self.yolo_load_failed = True
-            return
+        if self.use_fake_detections:
+            self.node.get_logger().warning(
+                "Fake detection mode enabled; skipping YOLO model load"
+            )
+        else:
+            try:
+                self.yolo_model = YOLO("yolov8n.pt")
+                self.node.get_logger().info("YOLO model loaded successfully")
+            except Exception as e:
+                self.node.get_logger().error(f"Failed to load YOLO model: {e}")
+                self.yolo_load_failed = True
+                return
         self.yolo_ready.set()
         ready_msg = Bool()
         ready_msg.data = True
         self.perception_ready_pub.publish(ready_msg)
         self.node.get_logger().info(
-            "YOLO is ready; exploration and navigation are enabled"
+            "Perception is ready; exploration and navigation are enabled"
         )
 
         while self.yolo_running:
@@ -148,9 +157,7 @@ class Turtlebot3:
 
             image_data = self.image_queue.get_nowait()
 
-            detections = self.image_processor.yolo_detection(
-                image_data["image"], self.interval
-            )
+            detections = self.image_processor.yolo_detection(image_data["image"])
 
             if detections:
                 if len(self.detected_objects) == 0:

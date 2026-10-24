@@ -1,4 +1,5 @@
 from datetime import datetime
+import numpy as np
 from cv_bridge import CvBridge
 from .constants import HARMFUL_OBJECTS, CONFIDENCE_THRESHOLD
 
@@ -23,39 +24,61 @@ class ImageProcessor:
             return None
 
     def yolo_detection(self, cv_image):
+        if self.robot.use_fake_detections:
+            detections = self.fake_detections()
+            self.robot.node.get_logger().info(f"Fake detections: {detections}")
+            return detections
+
         results = self.robot.yolo_model(cv_image, verbose=False)
         detections = results[0].boxes.data.cpu().numpy()
         detected_objects = []
-        for det in detections:
-            x1, y1, x2, y2, conf, cls_id = det
-            if conf > CONFIDENCE_THRESHOLD:
-                class_name = self.robot.yolo_model.names[int(cls_id)]
-                if class_name in HARMFUL_OBJECTS:
-                    self.robot.node.get_logger().warn(
-                        f"Harmful object detected: {class_name} with confidence {conf:.2f}"
-                    )
-                    new_object = {
-                        "class": class_name,
-                        "pose": self.robot.estimated_pose,
-                        "conf": conf,
-                        "count": 1,
-                    }
-                    detected_objects.append(new_object)
+        if self.robot.estimated_pose is None:
+            return detected_objects
 
+        for detection in detections:
+            if len(detection) < 6:
+                continue
+
+            confidence = float(detection[4])
+            class_id = int(detection[5])
+            class_name = self.robot.yolo_model.names[class_id]
+            if confidence <= CONFIDENCE_THRESHOLD or class_name not in HARMFUL_OBJECTS:
+                continue
+
+            self.robot.node.get_logger().warning(
+                f"Harmful object detected: {class_name} "
+                f"with confidence {confidence:.2f}"
+            )
+            detected_objects.append(
+                {
+                    "class": class_name,
+                    "pose": list(self.robot.estimated_pose),
+                    "conf": confidence,
+                    "count": 1,
+                }
+            )
+
+        self.robot.node.get_logger().info(
+            f"YOLO harmful detections: {detected_objects}"
+        )
         return detected_objects
 
-    def fake_detections(self, interval=0.1):
+    def fake_detections(self):
+
         if self.robot.estimated_pose is None:
             return []
 
         x, y, theta = self.robot.estimated_pose
-        array_of_objects = []
-        for i in range(0, 20, 1):
-            new_object = {
-                "class": "knife",
-                "pose": [x + 0.2 + (i * interval), y + 0.1 + (i * interval), theta],
-                "conf": 0.9 - (i * interval * 0.1),
-                "count": 1,
-            }
-            array_of_objects.append(new_object)
-        return array_of_objects
+
+        noise_x = np.random.normal(0, 0.03)
+        noise_y = np.random.normal(0, 0.03)
+        noise_conf = np.random.normal(0, 0.1)
+
+        obj = {
+            "class": "knife",
+            "pose": [x + 0.02 + noise_x, y + 0.01 + noise_y, theta],
+            "conf": 0.9 - noise_conf,
+            "count": 1,
+        }
+
+        return [obj]
